@@ -1,0 +1,15 @@
+node_modules/
+
+# Локальная база создаётся командой npm run seed
+infoteh.db
+infoteh.db-journal
+infoteh.db-wal
+infoteh.db-shm
+
+# PDF генерируются командой npm run generate-pdfs
+uploads/*
+!uploads/.gitkeep
+
+.DS_Store
+Thumbs.db
+*.log

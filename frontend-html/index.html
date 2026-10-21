@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ИнфоТех - База знаний для монтажников</title>
+  <link rel="icon" type="image/x-icon" href="img/favico.png">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&family=Varela&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="login-page" class="page">
+    <div class="login-container">
+      <div class="login-header">
+        <div class="logo">
+          <img src="img/logo.png" alt="Логотип">
+        </div>
+        <h1>ООО "ИнфоТех"</h1>
+        <p>База знаний для монтажников</p>
+      </div>
+      
+      <form id="login-form" class="login-form">
+        <div id="login-error" class="error-message hidden"></div>
+        
+        <div class="form-group">
+          <label for="tab-number">Табельный номер</label>
+          <input type="text" id="tab-number" name="tabNumber" placeholder="Например: M002" required>
+        </div>
+        
+        <div class="form-group">
+          <label for="password">Пароль</label>
+          <div class="password-wrapper">
+            <input type="password" id="password" name="password" placeholder="Введите пароль" required>
+            <button type="button" id="toggle-password" class="toggle-password">👁️</button>
+          </div>
+        </div>
+        
+        <button type="submit" class="btn btn-primary btn-block">Войти в систему</button>
+        
+      </form>
+    </div>
+  </div>
+
+  <div id="app-page" class="page hidden">
+    <div class="mobile-menu-overlay" id="mobile-menu-overlay"></div>
+
+    <aside class="mobile-menu" id="mobile-menu" aria-label="Мобильное меню" aria-hidden="true">
+      <div class="mobile-menu-header">
+        <img src="img/logo.png" alt="ИнфоТех" class="mobile-menu-logo">
+        <button type="button" class="mobile-menu-close" id="mobile-menu-close" aria-label="Закрыть меню">✕</button>
+      </div>
+
+      <div class="mobile-user">
+        <span id="mobile-user-name" class="mobile-user-name"></span>
+        <span id="mobile-user-role" class="mobile-user-role"></span>
+      </div>
+
+      <nav class="mobile-nav" aria-label="Мобильная навигация">
+        <button class="nav-btn active" data-page="catalog">Каталог инструкций</button>
+        <button class="nav-btn hidden" data-page="add-article">Добавить инструкцию</button>
+        <button class="nav-btn hidden" data-page="vidy-rabot">Виды работ</button>
+        <button class="nav-btn hidden" data-page="raboty">Работы</button>
+        <button class="nav-btn hidden" data-page="users">Сотрудники</button>
+      </nav>
+
+      <button type="button" class="btn-logout mobile-logout" id="mobile-logout-btn">Выйти</button>
+    </aside>
+
+    <header class="header">
+      <div class="header-content">
+        <div class="header-logo">
+          <img src="img/logo.png" alt="ИнфоТех" class="header-logo-img">
+        </div>
+        
+        <nav class="nav" id="main-nav" aria-label="Основная навигация">
+          <button class="nav-btn active" data-page="catalog">Каталог инструкций</button>
+          <button class="nav-btn hidden" data-page="add-article" id="nav-add-article">Добавить инструкцию</button>
+          <button class="nav-btn hidden" data-page="vidy-rabot" id="nav-vidy-rabot">Виды работ</button>
+          <button class="nav-btn hidden" data-page="raboty" id="nav-raboty">Работы</button>
+          <button class="nav-btn hidden" data-page="users" id="nav-users">Сотрудники</button>
+        </nav>
+        
+        <div class="user-info">
+          <div class="user-details">
+            <span id="user-name" class="user-name"></span>
+            <span id="user-role" class="user-role"></span>
+          </div>
+          <button id="logout-btn" class="btn-logout" title="Выйти">Выйти</button>
+        </div>
+
+        <button type="button" class="nav-toggle" id="nav-toggle" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobile-menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+    </header>
+
+    <main class="main-content">
+      
+      <section id="catalog-page" class="content-section">
+        <div class="section-header">
+          <h1>Каталог инструкций, ГОСТов, решений</h1>
+          <p>Инструкции по монтажным и ремонтным работам</p>
+        </div>
+        
+        <div class="filters">
+          <input type="text" id="search-input" class="search-input" placeholder="Поиск по названию, ключевым словам">
+          <select id="filter-vid" class="filter-select">
+            <option value="all">Все виды работ</option>
+          </select>
+        </div>
+        
+        <div class="stats" id="catalog-stats"></div>
+        
+        <div id="articles-list" class="articles-list"></div>
+      </section>
+      <section id="add-article-page" class="content-section hidden">
+        <div class="section-header">
+          <h1>Добавить инструкцию</h1>
+          <p>Создание новой инструкции</p>
+        </div>
+        
+        <form id="article-form" class="article-form">
+          <div id="article-success" class="success-message hidden"></div>
+          <div id="article-error" class="error-message hidden"></div>
+          
+          <div class="form-group">
+            <label for="article-title">Название инструкции<span class="required">*</span></label>
+            <input type="text" id="article-title" name="title" placeholder="Введите название инструкции" required>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label for="article-rabota">Работа <span class="required">*</span></label>
+              <select id="article-rabota" name="rabotaId" required>
+                <option value="">Выберите работу</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="article-keywords">Ключевые слова</label>
+              <input type="text" id="article-keywords" name="keywords" placeholder="через запятую">
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label for="article-content">Текст инструкции <span class="required">*</span></label>
+            <textarea id="article-content" name="content" rows="12" placeholder="Введите текст инструкции" required></textarea>
+            <span class="char-count"><span id="char-count">0</span> символов</span>
+          </div>
+          
+          <div class="form-group">
+            <label for="article-pdf">Файл инструкции (PDF)</label>
+            <div class="file-upload-wrapper">
+              <input type="file" id="article-pdf" name="pdfFile" accept=".pdf" class="file-input">
+              <label for="article-pdf" class="file-upload-label">
+                <span class="file-upload-icon"></span>
+                <span class="file-upload-text" id="file-upload-text">Выберите PDF-файл или перетащите сюда</span>
+              </label>
+              <button type="button" id="clear-pdf" class="btn-clear-file hidden">Удалить файл</button>
+            </div>
+            <p class="file-hint">Максимальный размер: 10 МБ</p>
+          </div>
+          
+          <div class="author-info">
+            <span>Автор: </span>
+            <strong id="article-author"></strong>
+          </div>
+          
+          <button type="submit" class="btn btn-primary btn-block">Опубликовать инструкцию</button>
+        </form>
+      </section>
+
+      <section id="vidy-rabot-page" class="content-section hidden">
+        <div class="section-header">
+          <div class="section-header-row">
+            <div>
+              <h1>Виды работ</h1>
+              <p>Управление категориями работ (монтажные, ремонтные и т.д.)</p>
+            </div>
+            <button id="show-add-vid" class="btn btn-primary">Добавить вид работ</button>
+          </div>
+        </div>
+
+        <div id="add-vid-form-container" class="card hidden">
+          <h3>Новый вид работ</h3>
+          <form id="add-vid-form">
+            <div id="vid-form-error" class="error-message hidden"></div>
+            <div id="vid-form-success" class="success-message hidden"></div>
+            
+            <div class="form-group">
+              <label for="new-vid-name">Название вида работ <span class="required">*</span></label>
+              <input type="text" id="new-vid-name" placeholder="Например: Монтажные работы" required>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Добавить вид работ</button>
+          </form>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Название вида работ</th>
+              </tr>
+            </thead>
+            <tbody id="vidy-rabot-list"></tbody>
+          </table>
+        </div>
+
+        <div id="vidy-rabot-empty" class="empty-state hidden">
+          <h3>Виды работ не найдены</h3>
+          <p>Добавьте первый вид работ, чтобы начать</p>
+        </div>
+      </section>
+
+      <section id="raboty-page" class="content-section hidden">
+        <div class="section-header">
+          <div class="section-header-row">
+            <div>
+              <h1>Работы</h1>
+              <p>Управление списком работ по монтажу и ремонту</p>
+            </div>
+            <button id="show-add-rabota" class="btn btn-primary">Добавить работу</button>
+          </div>
+        </div>
+
+        <div id="add-rabota-form-container" class="card hidden">
+          <h3>Новая работа</h3>
+          <form id="add-rabota-form">
+            <div id="rabota-form-error" class="error-message hidden"></div>
+            <div id="rabota-form-success" class="success-message hidden"></div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label for="new-rabota-name">Название работы <span class="required">*</span></label>
+                <input type="text" id="new-rabota-name" placeholder="Например: Монтаж электропроводки" required>
+              </div>
+              <div class="form-group">
+                <label for="new-rabota-vid">Вид работ <span class="required">*</span></label>
+                <select id="new-rabota-vid" required>
+                  <option value="">Выберите вид работ</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label for="new-rabota-description">Описание</label>
+              <textarea id="new-rabota-description" rows="3" placeholder="Краткое описание работы"></textarea>
+            </div>
+            
+            <div class="form-group">
+              <label for="new-rabota-instruction">Инструкция</label>
+              <textarea id="new-rabota-instruction" rows="5" placeholder="Пошаговая инструкция выполнения работы"></textarea>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Добавить работу</button>
+          </form>
+        </div>
+        
+        <div class="filters">
+          <select id="filter-raboty-vid" class="filter-select">
+            <option value="all">Все виды работ</option>
+          </select>
+          <input type="text" id="search-raboty" class="search-input" placeholder="Поиск по названию">
+        </div>
+
+        <div id="raboty-list" class="raboty-list"></div>
+
+        <div id="raboty-empty" class="empty-state hidden">
+          <h3>Работы не найдены</h3>
+          <p>Добавьте первую работу или измените фильтры</p>
+        </div>
+      </section>
+
+      <section id="users-page" class="content-section hidden">
+        <div class="section-header">
+          <div class="section-header-row">
+            <div>
+              <h1>Управление сотрудниками</h1>
+              <p>Назначение должностей и управление доступом</p>
+            </div>
+            <button id="show-add-user" class="btn btn-primary">Добавить сотрудника</button>
+          </div>
+        </div>
+        
+        <div id="add-user-form-container" class="card hidden">
+          <h3>Новый сотрудник</h3>
+          <form id="add-user-form">
+            <div id="user-form-error" class="error-message hidden"></div>
+            <div id="user-form-success" class="success-message hidden"></div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label for="new-fullname">ФИО</label>
+                <input type="text" id="new-fullname" placeholder="Иванов Иван Иванович" required>
+              </div>
+              <div class="form-group">
+                <label for="new-tabnumber">Табельный номер</label>
+                <input type="text" id="new-tabnumber" placeholder="M003" required>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="new-password">Пароль</label>
+                <input type="text" id="new-password" placeholder="password123" required>
+              </div>
+              <div class="form-group">
+                <label for="new-role">Должность</label>
+                <select id="new-role">
+                  <option value="Монтажник">Монтажник</option>
+                  <option value="Старший монтажник">Старший монтажник</option>
+                  <option value="Администратор">Администратор</option>
+                </select>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Добавить сотрудника</button>
+          </form>
+        </div>
+        
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Сотрудник</th>
+                <th>Табельный номер</th>
+                <th>Должность</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody id="users-list"></tbody>
+          </table>
+        </div>
+        
+        <div class="roles-description">
+          <div class="role-card">
+            <h4>Монтажник</h4>
+            <ul>
+              <li class="allowed">✓ Просмотр каталога статей</li>
+              <li class="denied">✗ Добавление статей</li>
+              <li class="denied">✓ Добавление видов работ</li>
+              <li class="denied">✓ Добавление работ</li>
+              <li class="denied">✗ Управление сотрудниками</li>
+            </ul>
+          </div>
+          <div class="role-card">
+            <h4>Старший монтажник</h4>
+            <ul>
+              <li class="allowed">✓ Просмотр каталога статей</li>
+              <li class="allowed">✓ Добавление статей</li>
+              <li class="allowed">✓ Добавление видов работ</li>
+              <li class="allowed">✓ Добавление работ</li>
+              <li class="denied">✗ Управление сотрудниками</li>
+            </ul>
+          </div>
+          <div class="role-card">
+            <h4>Администратор</h4>
+            <ul>
+              <li class="allowed">✓ Просмотр каталога статей</li>
+              <li class="allowed">✓ Добавление статей</li>
+              <li class="allowed">✓ Добавление видов работ</li>
+              <li class="allowed">✓ Добавление работ</li>
+              <li class="allowed">✓ Управление сотрудниками</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>ООО "ИнфоТех" — База знаний для монтажников © <span id="current-year"></span></p>
+    </footer>
+  </div>
+
+  <div id="article-modal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-close" id="modal-close">✕</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
