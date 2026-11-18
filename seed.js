@@ -464,3 +464,4 @@ for (const employee of employees) {
 }
 console.log('');
 console.log('Дальше: npm run generate-pdfs');
+console.log('Затем модуль ПТО: npm run migrate-pto (создаст объекты и документы ПТО)');

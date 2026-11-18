@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ИнфоТех - База знаний для монтажников</title>
+  <title>ООО «ИНФОТЕХ БАЛАКОВО» — База знаний для монтажников</title>
   <link rel="icon" type="image/x-icon" href="img/favico.png">
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,7 +17,7 @@
         <div class="logo">
           <img src="img/logo.png" alt="Логотип">
         </div>
-        <h1>ООО "ИнфоТех"</h1>
+        <h1>ООО «ИНФОТЕХ БАЛАКОВО»</h1>
         <p>База знаний для монтажников</p>
       </div>
       
@@ -48,7 +48,7 @@
 
     <aside class="mobile-menu" id="mobile-menu" aria-label="Мобильное меню" aria-hidden="true">
       <div class="mobile-menu-header">
-        <img src="img/logo.png" alt="ИнфоТех" class="mobile-menu-logo">
+        <img src="img/logo.png" alt="ООО «ИНФОТЕХ БАЛАКОВО»" class="mobile-menu-logo">
         <button type="button" class="mobile-menu-close" id="mobile-menu-close" aria-label="Закрыть меню">✕</button>
       </div>
 
@@ -59,6 +59,7 @@
 
       <nav class="mobile-nav" aria-label="Мобильная навигация">
         <button class="nav-btn active" data-page="catalog">Каталог инструкций</button>
+        <button class="nav-btn" data-page="pto">Документы ПТО</button>
         <button class="nav-btn hidden" data-page="add-article">Добавить инструкцию</button>
         <button class="nav-btn hidden" data-page="vidy-rabot">Виды работ</button>
         <button class="nav-btn hidden" data-page="raboty">Работы</button>
@@ -71,11 +72,12 @@
     <header class="header">
       <div class="header-content">
         <div class="header-logo">
-          <img src="img/logo.png" alt="ИнфоТех" class="header-logo-img">
+          <img src="img/logo.png" alt="ООО «ИНФОТЕХ БАЛАКОВО»" class="header-logo-img">
         </div>
         
         <nav class="nav" id="main-nav" aria-label="Основная навигация">
           <button class="nav-btn active" data-page="catalog">Каталог инструкций</button>
+          <button class="nav-btn" data-page="pto" id="nav-pto">Документы ПТО</button>
           <button class="nav-btn hidden" data-page="add-article" id="nav-add-article">Добавить инструкцию</button>
           <button class="nav-btn hidden" data-page="vidy-rabot" id="nav-vidy-rabot">Виды работ</button>
           <button class="nav-btn hidden" data-page="raboty" id="nav-raboty">Работы</button>
@@ -117,6 +119,96 @@
         
         <div id="articles-list" class="articles-list"></div>
       </section>
+      <section id="pto-page" class="content-section hidden">
+        <div class="section-header">
+          <div class="section-header-row">
+            <div>
+              <h1>Документы ПТО</h1>
+              <p>Исполнительная документация, ППР, акты скрытых работ, журналы работ и входной контроль</p>
+            </div>
+            <div class="section-actions">
+              <button id="show-add-doc" class="btn btn-primary hidden">Добавить документ</button>
+              <button id="export-pto" class="btn btn-light">Выгрузить реестр</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats" id="pto-stats"></div>
+
+        <div class="filters pto-filters">
+          <select id="pto-filter-type" class="filter-select" aria-label="Фильтр по типу документа"></select>
+          <select id="pto-filter-object" class="filter-select" aria-label="Фильтр по объекту"></select>
+          <select id="pto-filter-status" class="filter-select" aria-label="Фильтр по статусу"></select>
+          <input type="text" id="pto-search" class="search-input" placeholder="Поиск: название, шифр, объект, ответственный">
+          <label class="pto-toggle">
+            <input type="checkbox" id="pto-filter-overdue">
+            <span>Только просроченные</span>
+          </label>
+        </div>
+
+        <div class="table-container table-container-scroll">
+          <table class="data-table pto-table">
+            <thead>
+              <tr>
+                <th>Тип</th>
+                <th>Документ</th>
+                <th>Объект</th>
+                <th>Раздел</th>
+                <th>Статус</th>
+                <th>Срок</th>
+                <th>Ответственный</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="pto-list"></tbody>
+          </table>
+        </div>
+
+        <div id="pto-empty" class="empty-state hidden">
+          <h3>Документы не найдены</h3>
+          <p>Измените фильтры или добавьте первый документ ПТО</p>
+        </div>
+
+        <div class="card pto-objects-card">
+          <div class="section-header-row">
+            <div>
+              <h3>Объекты</h3>
+              <p class="card-hint">Объекты, по которым ведётся документация ПТО</p>
+            </div>
+            <button id="show-add-object" class="btn btn-light btn-sm hidden">Добавить объект</button>
+          </div>
+
+          <form id="add-object-form" class="pto-object-form hidden">
+            <div id="object-form-error" class="error-message hidden"></div>
+            <div id="object-form-success" class="success-message hidden"></div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="new-object-name">Название объекта <span class="required">*</span></label>
+                <input type="text" id="new-object-name" placeholder="Например: ЖК «Солнечный», 2-я очередь" required>
+              </div>
+              <div class="form-group">
+                <label for="new-object-address">Адрес</label>
+                <input type="text" id="new-object-address" placeholder="г. Балаково, ул. Степная, 12">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="new-object-customer">Заказчик</label>
+                <input type="text" id="new-object-customer" placeholder="ООО «Балаково-Строй»">
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Добавить объект</button>
+            </div>
+          </form>
+
+          <div id="objects-list" class="objects-list"></div>
+        </div>
+      </section>
+
       <section id="add-article-page" class="content-section hidden">
         <div class="section-header">
           <h1>Добавить инструкцию</h1>
@@ -313,6 +405,7 @@
                 <select id="new-role">
                   <option value="Монтажник">Монтажник</option>
                   <option value="Старший монтажник">Старший монтажник</option>
+                  <option value="Инженер ПТО">Инженер ПТО</option>
                   <option value="Администратор">Администратор</option>
                 </select>
               </div>
@@ -342,8 +435,9 @@
             <ul>
               <li class="allowed">✓ Просмотр каталога статей</li>
               <li class="denied">✗ Добавление статей</li>
-              <li class="denied">✓ Добавление видов работ</li>
-              <li class="denied">✓ Добавление работ</li>
+              <li class="denied">✗ Добавление видов работ</li>
+              <li class="denied">✗ Добавление работ</li>
+              <li class="allowed">✓ Просмотр документов ПТО</li>
               <li class="denied">✗ Управление сотрудниками</li>
             </ul>
           </div>
@@ -354,6 +448,18 @@
               <li class="allowed">✓ Добавление статей</li>
               <li class="allowed">✓ Добавление видов работ</li>
               <li class="allowed">✓ Добавление работ</li>
+              <li class="allowed">✓ Просмотр документов ПТО</li>
+              <li class="denied">✗ Управление сотрудниками</li>
+            </ul>
+          </div>
+          <div class="role-card">
+            <h4>Инженер ПТО</h4>
+            <ul>
+              <li class="allowed">✓ Просмотр каталога статей</li>
+              <li class="denied">✗ Добавление статей</li>
+              <li class="allowed">✓ Документы ПТО: создание и правка</li>
+              <li class="allowed">✓ Смена статусов и объектов</li>
+              <li class="allowed">✓ Выгрузка реестра документов</li>
               <li class="denied">✗ Управление сотрудниками</li>
             </ul>
           </div>
@@ -364,6 +470,7 @@
               <li class="allowed">✓ Добавление статей</li>
               <li class="allowed">✓ Добавление видов работ</li>
               <li class="allowed">✓ Добавление работ</li>
+              <li class="allowed">✓ Полный доступ к документам ПТО</li>
               <li class="allowed">✓ Управление сотрудниками</li>
             </ul>
           </div>
@@ -372,7 +479,7 @@
     </main>
 
     <footer class="footer">
-      <p>ООО "ИнфоТех" — База знаний для монтажников © <span id="current-year"></span></p>
+      <p>ООО «ИНФОТЕХ БАЛАКОВО» — База знаний для монтажников © <span id="current-year"></span></p>
     </footer>
   </div>
 

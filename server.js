@@ -38,6 +38,23 @@ const upload = multer({
   }
 });
 
+// Файлы документов ПТО: кроме PDF допускаем офисные форматы,
+// потому что ППР, акты и журналы обычно готовят в Word и Excel.
+const DOC_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx'];
+
+const uploadDoc = multer({
+  storage: storage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (DOC_EXTENSIONS.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Разрешены файлы PDF, DOC, DOCX, XLS, XLSX'), false);
+    }
+  }
+});
+
 function removeFileQuietly(filePath) {
   if (!filePath) return;
 
@@ -145,6 +162,79 @@ function requireRole(roles) {
 
 const ADMIN_ONLY = ['Администратор'];
 const CONTENT_MANAGERS = ['Администратор', 'Старший монтажник'];
+const PTO_MANAGERS = ['Администратор', 'Инженер ПТО'];
+
+const ROLES = ['Монтажник', 'Старший монтажник', 'Инженер ПТО', 'Администратор'];
+
+const PTO_TYPES = [
+  'Исполнительная документация',
+  'ППР',
+  'Акт скрытых работ',
+  'Журнал работ',
+  'Входной контроль'
+];
+
+const PTO_STATUSES = [
+  'Черновик',
+  'На проверке',
+  'На согласовании',
+  'Утверждён',
+  'Отклонён',
+  'В архиве'
+];
+
+// Схема модуля ПТО создаётся при старте, если её ещё нет:
+// так модуль работает и без отдельного запуска migrate-pto.js.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS "Объект" (
+    "ID_объекта" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "Название" TEXT NOT NULL UNIQUE,
+    "Адрес" TEXT,
+    "Заказчик" TEXT,
+    "updated_at" DATETIME NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS "Документ_ПТО" (
+    "ID_документа" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "Тип" TEXT NOT NULL,
+    "Название" TEXT NOT NULL,
+    "ID_объекта" INTEGER,
+    "Шифр" TEXT,
+    "Раздел_проекта" TEXT,
+    "Статус" TEXT NOT NULL DEFAULT 'Черновик',
+    "Срок" TEXT,
+    "Ответственный" TEXT,
+    "Текст" TEXT,
+    "Файл" TEXT,
+    "ID_автора" INTEGER,
+    "Версия" INTEGER NOT NULL DEFAULT 1,
+    "Актуализирован" TEXT NOT NULL,
+    "updated_at" DATETIME NOT NULL,
+    FOREIGN KEY ("ID_объекта") REFERENCES "Объект"("ID_объекта")
+      ON DELETE SET NULL ON UPDATE CASCADE,
+    FOREIGN KEY ("ID_автора") REFERENCES "Сотрудник"("ID_сотрудника")
+      ON DELETE SET NULL ON UPDATE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS "История_ПТО" (
+    "ID_записи" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "ID_документа" INTEGER NOT NULL,
+    "Дата" DATETIME NOT NULL,
+    "Автор" TEXT,
+    "Действие" TEXT NOT NULL,
+    "Статус_был" TEXT,
+    "Статус_стал" TEXT,
+    "Версия" INTEGER,
+    "Комментарий" TEXT,
+    FOREIGN KEY ("ID_документа") REFERENCES "Документ_ПТО"("ID_документа")
+      ON DELETE CASCADE ON UPDATE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_Документ_ПТО_объект ON "Документ_ПТО"("ID_объекта");
+  CREATE INDEX IF NOT EXISTS idx_Документ_ПТО_тип ON "Документ_ПТО"("Тип");
+  CREATE INDEX IF NOT EXISTS idx_Документ_ПТО_статус ON "Документ_ПТО"("Статус");
+  CREATE INDEX IF NOT EXISTS idx_История_ПТО_документ ON "История_ПТО"("ID_документа");
+`);
 
 app.post('/api/auth/login', async (req, res) => {
   const { tabNumber, password } = req.body || {};
@@ -241,6 +331,10 @@ app.post('/api/sotrudniki', requireRole(ADMIN_ONLY), async (req, res) => {
     return res.status(400).json({ success: false, error: 'Заполните все поля' });
   }
 
+  if (!ROLES.includes(role)) {
+    return res.status(400).json({ success: false, error: 'Недопустимая должность' });
+  }
+
   try {
     const checkStmt = db.prepare('SELECT "ID_сотрудника" FROM "Сотрудник" WHERE "Табельный_номер" = ?');
     if (checkStmt.get(tabNumber)) {
@@ -270,7 +364,7 @@ app.put('/api/sotrudniki/:id/role', requireRole(ADMIN_ONLY), (req, res) => {
   const { id } = req.params;
   const { role } = req.body;
 
-  const validRoles = ['Монтажник', 'Старший монтажник', 'Администратор'];
+  const validRoles = ROLES;
   if (!validRoles.includes(role)) {
     return res.status(400).json({ success: false, error: 'Недопустимая должность' });
   }
@@ -628,14 +722,571 @@ app.put('/api/articles/:id', requireRole(CONTENT_MANAGERS), upload.single('pdfFi
     res.status(500).json({ success: false, error: error.message });
   }
 });
+// === Модуль ПТО: объекты, документы, статусы, история ======================
+
+const PTO_SELECT = `
+  SELECT
+    d."ID_документа" as id,
+    d."Тип" as type,
+    d."Название" as title,
+    d."ID_объекта" as objectId,
+    o."Название" as objectName,
+    d."Шифр" as cipher,
+    d."Раздел_проекта" as projectSection,
+    d."Статус" as status,
+    d."Срок" as dueDate,
+    d."Ответственный" as responsible,
+    d."Текст" as content,
+    d."Файл" as file,
+    d."ID_автора" as authorId,
+    a."ФИО" as authorName,
+    d."Версия" as version,
+    d."Актуализирован" as actualizedAt,
+    d."updated_at" as updatedAt
+  FROM "Документ_ПТО" d
+  LEFT JOIN "Объект" o ON d."ID_объекта" = o."ID_объекта"
+  LEFT JOIN "Сотрудник" a ON d."ID_автора" = a."ID_сотрудника"
+`;
+
+function buildPtoFilters(req) {
+  const conditions = [];
+  const params = [];
+
+  const type = String(req.query.type || '').trim();
+  if (type && type !== 'all') {
+    conditions.push('d."Тип" = ?');
+    params.push(type);
+  }
+
+  const status = String(req.query.status || '').trim();
+  if (status && status !== 'all') {
+    conditions.push('d."Статус" = ?');
+    params.push(status);
+  }
+
+  const objectId = String(req.query.objectId || '').trim();
+  if (objectId && objectId !== 'all') {
+    conditions.push('d."ID_объекта" = ?');
+    params.push(Number(objectId));
+  }
+
+  const q = String(req.query.q || '').trim();
+  if (q) {
+    const like = `%${q}%`;
+    conditions.push(`(
+      d."Название" LIKE ? OR
+      COALESCE(d."Шифр", '') LIKE ? OR
+      COALESCE(d."Раздел_проекта", '') LIKE ? OR
+      COALESCE(o."Название", '') LIKE ? OR
+      COALESCE(d."Ответственный", '') LIKE ?
+    )`);
+    params.push(like, like, like, like, like);
+  }
+
+  if (String(req.query.overdue || '') === '1') {
+    conditions.push(`
+      d."Срок" IS NOT NULL AND d."Срок" <> ''
+      AND d."Срок" < date('now', 'localtime')
+      AND d."Статус" NOT IN ('Утверждён', 'В архиве')
+    `);
+  }
+
+  return {
+    where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
+    params
+  };
+}
+
+function validatePtoFields(body) {
+  const type = String(body.type || '').trim();
+  const title = String(body.title || '').trim();
+  const status = String(body.status || '').trim() || 'Черновик';
+  const dueDate = String(body.dueDate || '').trim();
+  const objectIdRaw = String(body.objectId || '').trim();
+
+  if (!type || !PTO_TYPES.includes(type)) {
+    return { error: 'Выберите тип документа' };
+  }
+
+  if (!title) {
+    return { error: 'Введите название документа' };
+  }
+
+  if (!PTO_STATUSES.includes(status)) {
+    return { error: 'Недопустимый статус документа' };
+  }
+
+  if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    return { error: 'Срок указывается в формате ГГГГ-ММ-ДД' };
+  }
+
+  const objectId = objectIdRaw ? Number(objectIdRaw) : null;
+  if (objectIdRaw && !Number.isInteger(objectId)) {
+    return { error: 'Некорректный объект' };
+  }
+
+  return {
+    fields: {
+      type,
+      title,
+      status,
+      dueDate: dueDate || null,
+      objectId,
+      cipher: String(body.cipher || '').trim() || null,
+      projectSection: String(body.projectSection || '').trim() || null,
+      responsible: String(body.responsible || '').trim() || null,
+      content: String(body.content || '').trim() || null
+    }
+  };
+}
+
+function addPtoHistory(documentId, action, options = {}) {
+  db.prepare(`
+    INSERT INTO "История_ПТО" (
+      "ID_документа", "Дата", "Автор", "Действие",
+      "Статус_был", "Статус_стал", "Версия", "Комментарий"
+    ) VALUES (?, datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?)
+  `).run(
+    documentId,
+    options.author || null,
+    action,
+    options.statusFrom || null,
+    options.statusTo || null,
+    options.version ?? null,
+    options.comment || null
+  );
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return /[";\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+// --- Объекты ---
+
+app.get('/api/objects', (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT
+        o."ID_объекта" as id,
+        o."Название" as name,
+        o."Адрес" as address,
+        o."Заказчик" as customer,
+        o."updated_at" as updatedAt,
+        (SELECT COUNT(*) FROM "Документ_ПТО" d WHERE d."ID_объекта" = o."ID_объекта") as documentsCount
+      FROM "Объект" o
+      ORDER BY o."Название"
+    `).all();
+
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Ошибка загрузки объектов:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/objects', requireRole(PTO_MANAGERS), (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const address = String(req.body.address || '').trim() || null;
+  const customer = String(req.body.customer || '').trim() || null;
+
+  if (!name) {
+    return res.status(400).json({ success: false, error: 'Введите название объекта' });
+  }
+
+  try {
+    const result = db.prepare(`
+      INSERT INTO "Объект" ("Название", "Адрес", "Заказчик", "updated_at")
+      VALUES (?, ?, ?, datetime('now', 'localtime'))
+    `).run(name, address, customer);
+
+    console.log(`Добавлен объект: ${name}`);
+    res.json({ success: true, data: { id: result.lastInsertRowid, name, address, customer } });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(409).json({ success: false, error: 'Объект с таким названием уже существует' });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/api/objects/:id', requireRole(PTO_MANAGERS), (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const address = String(req.body.address || '').trim() || null;
+  const customer = String(req.body.customer || '').trim() || null;
+
+  if (!name) {
+    return res.status(400).json({ success: false, error: 'Введите название объекта' });
+  }
+
+  try {
+    const result = db.prepare(`
+      UPDATE "Объект"
+      SET "Название" = ?, "Адрес" = ?, "Заказчик" = ?, "updated_at" = datetime('now', 'localtime')
+      WHERE "ID_объекта" = ?
+    `).run(name, address, customer, req.params.id);
+
+    if (result.changes === 0) {
+      return res.status(404).json({ success: false, error: 'Объект не найден' });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(409).json({ success: false, error: 'Объект с таким названием уже существует' });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/objects/:id', requireRole(PTO_MANAGERS), (req, res) => {
+  try {
+    const { count } = db
+      .prepare('SELECT COUNT(*) as count FROM "Документ_ПТО" WHERE "ID_объекта" = ?')
+      .get(req.params.id);
+
+    if (count > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Невозможно удалить: к объекту привязано ${count} документов`
+      });
+    }
+
+    const result = db.prepare('DELETE FROM "Объект" WHERE "ID_объекта" = ?').run(req.params.id);
+
+    if (result.changes === 0) {
+      return res.status(404).json({ success: false, error: 'Объект не найден' });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// --- Реестр документов (CSV) ---
+// Объявлен до /api/pto/:id, иначе Express примет "export.csv" за идентификатор.
+
+app.get('/api/pto/export.csv', (req, res) => {
+  try {
+    const { where, params } = buildPtoFilters(req);
+    const rows = db.prepare(`
+      ${PTO_SELECT}
+      ${where}
+      ORDER BY CASE WHEN d."Срок" IS NULL OR d."Срок" = '' THEN 1 ELSE 0 END, d."Срок", d."ID_документа"
+    `).all(...params);
+
+    const header = [
+      '№', 'Тип документа', 'Наименование', 'Объект', 'Шифр', 'Раздел проекта',
+      'Статус', 'Срок', 'Ответственный', 'Версия', 'Актуализирован', 'Обновлён', 'Файл'
+    ];
+
+    const lines = [header.map(csvCell).join(';')];
+
+    rows.forEach((row, index) => {
+      lines.push([
+        index + 1,
+        row.type,
+        row.title,
+        row.objectName || '',
+        row.cipher || '',
+        row.projectSection || '',
+        row.status,
+        row.dueDate || '',
+        row.responsible || '',
+        row.version,
+        row.actualizedAt || '',
+        row.updatedAt || '',
+        row.file || ''
+      ].map(csvCell).join(';'));
+    });
+
+    const fileName = `reestr-pto-${new Date().toISOString().slice(0, 10)}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    // BOM нужен, чтобы Excel корректно открыл кириллицу.
+    res.send('\uFEFF' + lines.join('\r\n'));
+  } catch (error) {
+    console.error('Ошибка выгрузки реестра ПТО:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// --- Документы ПТО ---
+
+app.get('/api/pto', (req, res) => {
+  try {
+    const { where, params } = buildPtoFilters(req);
+    const rows = db.prepare(`
+      ${PTO_SELECT}
+      ${where}
+      ORDER BY CASE WHEN d."Срок" IS NULL OR d."Срок" = '' THEN 1 ELSE 0 END, d."Срок", d."ID_документа"
+    `).all(...params);
+
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Ошибка загрузки документов ПТО:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/pto/:id', (req, res) => {
+  try {
+    const document = db.prepare(`${PTO_SELECT} WHERE d."ID_документа" = ?`).get(req.params.id);
+
+    if (!document) {
+      return res.status(404).json({ success: false, error: 'Документ не найден' });
+    }
+
+    const history = db.prepare(`
+      SELECT
+        "ID_записи" as id,
+        "Дата" as date,
+        "Автор" as author,
+        "Действие" as action,
+        "Статус_был" as statusFrom,
+        "Статус_стал" as statusTo,
+        "Версия" as version,
+        "Комментарий" as comment
+      FROM "История_ПТО"
+      WHERE "ID_документа" = ?
+      ORDER BY "Дата" DESC, "ID_записи" DESC
+    `).all(req.params.id);
+
+    res.json({ success: true, data: { ...document, history } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/pto', requireRole(PTO_MANAGERS), uploadDoc.single('docFile'), (req, res) => {
+  const { fields, error: validationError } = validatePtoFields(req.body);
+
+  if (validationError) {
+    removeFileQuietly(req.file && req.file.path);
+    return res.status(400).json({ success: false, error: validationError });
+  }
+
+  try {
+    if (fields.objectId) {
+      const objectExists = db
+        .prepare('SELECT "ID_объекта" FROM "Объект" WHERE "ID_объекта" = ?')
+        .get(fields.objectId);
+
+      if (!objectExists) {
+        removeFileQuietly(req.file && req.file.path);
+        return res.status(400).json({ success: false, error: 'Объект не найден' });
+      }
+    }
+
+    const filePath = req.file ? `/uploads/${req.file.filename}` : null;
+
+    const result = db.prepare(`
+      INSERT INTO "Документ_ПТО" (
+        "Тип", "Название", "ID_объекта", "Шифр", "Раздел_проекта", "Статус",
+        "Срок", "Ответственный", "Текст", "Файл", "ID_автора", "Версия",
+        "Актуализирован", "updated_at"
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, date('now', 'localtime'), datetime('now', 'localtime'))
+    `).run(
+      fields.type,
+      fields.title,
+      fields.objectId,
+      fields.cipher,
+      fields.projectSection,
+      fields.status,
+      fields.dueDate,
+      fields.responsible,
+      fields.content,
+      filePath,
+      req.session.userId
+    );
+
+    addPtoHistory(result.lastInsertRowid, 'Создан', {
+      author: req.session.fullName,
+      statusTo: fields.status,
+      version: 1,
+      comment: req.body.comment || null
+    });
+
+    console.log(`📋 Добавлен документ ПТО: "${fields.title}" (${fields.type})`);
+    res.json({ success: true, data: { id: result.lastInsertRowid } });
+  } catch (error) {
+    removeFileQuietly(req.file && req.file.path);
+    console.error('Ошибка добавления документа ПТО:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/api/pto/:id', requireRole(PTO_MANAGERS), uploadDoc.single('docFile'), (req, res) => {
+  const { fields, error: validationError } = validatePtoFields(req.body);
+
+  if (validationError) {
+    removeFileQuietly(req.file && req.file.path);
+    return res.status(400).json({ success: false, error: validationError });
+  }
+
+  try {
+    const existing = db.prepare(`
+      SELECT "Статус" as status, "Файл" as file, "Версия" as version
+      FROM "Документ_ПТО" WHERE "ID_документа" = ?
+    `).get(req.params.id);
+
+    if (!existing) {
+      removeFileQuietly(req.file && req.file.path);
+      return res.status(404).json({ success: false, error: 'Документ не найден' });
+    }
+
+    if (fields.objectId) {
+      const objectExists = db
+        .prepare('SELECT "ID_объекта" FROM "Объект" WHERE "ID_объекта" = ?')
+        .get(fields.objectId);
+
+      if (!objectExists) {
+        removeFileQuietly(req.file && req.file.path);
+        return res.status(400).json({ success: false, error: 'Объект не найден' });
+      }
+    }
+
+    const newFile = req.file ? `/uploads/${req.file.filename}` : existing.file;
+    const isNewRevision = Boolean(req.file) || String(req.body.newRevision || '') === 'true';
+    const version = isNewRevision ? existing.version + 1 : existing.version;
+    const statusChanged = existing.status !== fields.status;
+
+    db.prepare(`
+      UPDATE "Документ_ПТО"
+      SET "Тип" = ?, "Название" = ?, "ID_объекта" = ?, "Шифр" = ?, "Раздел_проекта" = ?,
+          "Статус" = ?, "Срок" = ?, "Ответственный" = ?, "Текст" = ?, "Файл" = ?,
+          "Версия" = ?, "Актуализирован" = date('now', 'localtime'),
+          "updated_at" = datetime('now', 'localtime')
+      WHERE "ID_документа" = ?
+    `).run(
+      fields.type,
+      fields.title,
+      fields.objectId,
+      fields.cipher,
+      fields.projectSection,
+      fields.status,
+      fields.dueDate,
+      fields.responsible,
+      fields.content,
+      newFile,
+      version,
+      req.params.id
+    );
+
+    if (req.file && existing.file && existing.file !== newFile) {
+      removeFileQuietly(path.join(__dirname, existing.file));
+    }
+
+    if (statusChanged) {
+      addPtoHistory(req.params.id, 'Смена статуса', {
+        author: req.session.fullName,
+        statusFrom: existing.status,
+        statusTo: fields.status,
+        version,
+        comment: req.body.comment || null
+      });
+    }
+
+    if (isNewRevision) {
+      addPtoHistory(req.params.id, 'Новая редакция', {
+        author: req.session.fullName,
+        version,
+        comment: req.file ? 'Заменён файл документа' : 'Отмечена новая редакция без замены файла'
+      });
+    }
+
+    if (!statusChanged && !isNewRevision) {
+      addPtoHistory(req.params.id, 'Изменён', {
+        author: req.session.fullName,
+        version
+      });
+    }
+
+    console.log(`Изменён документ ПТО #${req.params.id}: "${fields.title}"`);
+    res.json({ success: true, data: { id: Number(req.params.id), file: newFile, version } });
+  } catch (error) {
+    removeFileQuietly(req.file && req.file.path);
+    console.error('Ошибка редактирования документа ПТО:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/pto/:id/status', requireRole(PTO_MANAGERS), (req, res) => {
+  const status = String(req.body.status || '').trim();
+  const comment = String(req.body.comment || '').trim() || null;
+
+  if (!PTO_STATUSES.includes(status)) {
+    return res.status(400).json({ success: false, error: 'Недопустимый статус документа' });
+  }
+
+  try {
+    const existing = db
+      .prepare('SELECT "Статус" as status, "Версия" as version FROM "Документ_ПТО" WHERE "ID_документа" = ?')
+      .get(req.params.id);
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Документ не найден' });
+    }
+
+    if (existing.status === status) {
+      return res.status(400).json({ success: false, error: 'Документ уже в этом статусе' });
+    }
+
+    db.prepare(`
+      UPDATE "Документ_ПТО"
+      SET "Статус" = ?, "Актуализирован" = date('now', 'localtime'),
+          "updated_at" = datetime('now', 'localtime')
+      WHERE "ID_документа" = ?
+    `).run(status, req.params.id);
+
+    addPtoHistory(req.params.id, 'Смена статуса', {
+      author: req.session.fullName,
+      statusFrom: existing.status,
+      statusTo: status,
+      version: existing.version,
+      comment
+    });
+
+    console.log(`Документ ПТО #${req.params.id}: ${existing.status} → ${status}`);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/pto/:id', requireRole(PTO_MANAGERS), (req, res) => {
+  try {
+    const existing = db
+      .prepare('SELECT "Файл" as file FROM "Документ_ПТО" WHERE "ID_документа" = ?')
+      .get(req.params.id);
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Документ не найден' });
+    }
+
+    db.prepare('DELETE FROM "Документ_ПТО" WHERE "ID_документа" = ?').run(req.params.id);
+
+    if (existing.file) {
+      removeFileQuietly(path.join(__dirname, existing.file));
+    }
+
+    console.log(`Удалён документ ПТО #${req.params.id}`);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ success: false, error: 'Файл слишком большой (макс. 10MB)' });
+      return res.status(400).json({ success: false, error: 'Файл слишком большой (макс. 10 МБ для инструкций, 20 МБ для документов ПТО)' });
     }
     return res.status(400).json({ success: false, error: error.message });
   }
-  if (error.message === 'Разрешены только PDF-файлы') {
+  if (error.message === 'Разрешены только PDF-файлы' || error.message === 'Разрешены файлы PDF, DOC, DOCX, XLS, XLSX') {
     return res.status(400).json({ success: false, error: error.message });
   }
   next(error);
@@ -671,7 +1322,7 @@ app.get('/', (req, res) => {
 
 
 app.listen(PORT, () => {
-  console.log('Сервер ИнфоТех запущен');
+  console.log('Сервер ООО «ИНФОТЕХ БАЛАКОВО» запущен');
 });
 
 process.on('SIGINT', () => {

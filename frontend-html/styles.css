@@ -86,6 +86,20 @@ body {
   font-size: 13px;
 }
 
+/* Кнопка для светлых поверхностей: .btn-secondary рассчитана на тёмный фон */
+.btn-light {
+  background: #FFFFFF;
+  color: #1f7a2f;
+  border: 1px solid #B7DFBE;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.btn-light:hover {
+  background: #F2FAF3;
+  color: #166534;
+  transform: translateY(-1px);
+}
+
 .login-container {
   max-width: 420px;
   margin: 0 auto;
@@ -113,10 +127,12 @@ body {
 }
 
 .login-header h1 {
-  font-size: 28px;
+  font-size: 24px;
+  line-height: 1.25;
   font-weight: 700;
   color: #3C3C3A;
   margin-bottom: 8px;
+  overflow-wrap: break-word;
 }
 
 .login-header p {
@@ -1457,5 +1473,442 @@ body.modal-open {
   
   .stats {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ==========================================================================
+   Модуль ПТО: реестр документов, статусы, история
+   ========================================================================== */
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.card-hint {
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.table-container-scroll {
+  overflow-x: auto;
+}
+
+.pto-filters {
+  align-items: center;
+}
+
+.pto-filters .filter-select {
+  min-width: 180px;
+}
+
+.pto-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px;
+  background: #EEEFF0;
+  border-radius: 10px;
+  color: #3C3C3A;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pto-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #27A73A;
+}
+
+.pto-table {
+  min-width: 920px;
+}
+
+.pto-table th,
+.pto-table td {
+  padding: 14px 16px;
+}
+
+.pto-type-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: #EEF7EF;
+  color: #1f7a2f;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.pto-doc-title {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #3C3C3A;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pto-doc-title:hover {
+  color: #27A73A;
+  text-decoration: underline;
+}
+
+.pto-doc-sub {
+  margin-top: 2px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-badge.draft {
+  background: #F1F2F4;
+  color: #475569;
+}
+
+.status-badge.check {
+  background: #FEF3C7;
+  color: #B45309;
+}
+
+.status-badge.review {
+  background: #DBEAFE;
+  color: #1D4ED8;
+}
+
+.status-badge.approved {
+  background: #DCFCE7;
+  color: #15803D;
+}
+
+.status-badge.rejected {
+  background: #FEE2E2;
+  color: #B91C1C;
+}
+
+.status-badge.archived {
+  background: #E5E7EB;
+  color: #4B5563;
+}
+
+.pto-overdue {
+  color: #DC2626;
+  font-weight: 600;
+}
+
+.pto-row-overdue {
+  background: #FFF7F7;
+}
+
+.pto-actions {
+  text-align: right;
+}
+
+.pto-objects-card .section-header-row {
+  align-items: center;
+}
+
+.pto-object-form {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid #E8E9EB;
+  border-radius: 12px;
+  background: #FAFAFB;
+}
+
+.objects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.object-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border: 1px solid #E8E9EB;
+  border-radius: 12px;
+  background: #FAFAFB;
+}
+
+.object-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.object-main strong {
+  color: #3C3C3A;
+  font-size: 15px;
+}
+
+.object-main span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.object-count {
+  color: #64748b;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.pto-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 16px;
+  color: #E2E8F0;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.pto-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: #27A73A;
+}
+
+.pto-file-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #E2E8F0;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.pto-file-input::file-selector-button {
+  margin-right: 12px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #334155;
+  color: #F1F5F9;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Карточка документа в модальном окне (тёмный фон) */
+
+.pto-detail {
+  color: #E2E8F0;
+}
+
+.pto-detail-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.pto-detail h2 {
+  color: white;
+}
+
+.pto-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.pto-detail-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.pto-detail-grid span {
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pto-detail-grid strong {
+  color: #F1F5F9;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pto-detail-text {
+  margin-bottom: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  color: #CBD5E1;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
+.pto-detail .pdf-actions {
+  margin-bottom: 18px;
+}
+
+.pto-status-panel {
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pto-status-panel h3 {
+  margin-bottom: 12px;
+  color: white;
+  font-size: 15px;
+}
+
+.pto-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pto-status-row .filter-select {
+  min-width: 180px;
+  background: #334155;
+  color: white;
+}
+
+.pto-status-row .search-input {
+  flex: 1;
+  min-width: 200px;
+  background: #0f172a;
+  border-color: #334155;
+  color: #E2E8F0;
+}
+
+.pto-history {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pto-history h3 {
+  margin-bottom: 12px;
+  color: white;
+  font-size: 15px;
+}
+
+.pto-history-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pto-history-list li {
+  position: relative;
+  padding-left: 18px;
+}
+
+.pto-history-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #27A73A;
+}
+
+.pto-history-action {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #F1F5F9;
+  font-size: 14px;
+}
+
+.pto-history-date {
+  color: #94a3b8;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pto-history-meta {
+  margin-top: 2px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.pto-history-comment {
+  margin-top: 4px;
+  color: #CBD5E1;
+  font-size: 13px;
+}
+
+.role-badge.pto {
+  background: white;
+  color: #0284C7;
+  font-weight: bold;
+  border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+.stat-card .number.red {
+  color: #fecaca;
+}
+
+@media (max-width: 768px) {
+  .pto-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pto-filters .filter-select,
+  .pto-filters .search-input,
+  .pto-filters .pto-toggle {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .section-actions {
+    width: 100%;
+  }
+
+  .section-actions .btn {
+    flex: 1;
+  }
+
+  .pto-status-row .filter-select,
+  .pto-status-row .search-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .object-row {
+    flex-wrap: wrap;
   }
 }

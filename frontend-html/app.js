@@ -99,6 +99,7 @@ const addArticlePage = document.getElementById('add-article-page');
 const vidyRabotPage = document.getElementById('vidy-rabot-page');
 const rabotyPage = document.getElementById('raboty-page');
 const usersPage = document.getElementById('users-page');
+const ptoPage = document.getElementById('pto-page');
 
 const navToggle = document.getElementById('nav-toggle');
 const mobileMenu = document.getElementById('mobile-menu');
@@ -110,6 +111,40 @@ const mobileUserRole = document.getElementById('mobile-user-role');
 
 let searchRaboty = '';
 let filterRabotyVid = 'all';
+
+let ptoDocuments = [];
+let ptoObjects = [];
+let ptoFilterType = 'all';
+let ptoFilterObject = 'all';
+let ptoFilterStatus = 'all';
+let ptoSearch = '';
+let ptoOnlyOverdue = false;
+let ptoLoadRequestId = 0;
+
+const PTO_TYPES = [
+  'Исполнительная документация',
+  'ППР',
+  'Акт скрытых работ',
+  'Журнал работ',
+  'Входной контроль'
+];
+
+const PTO_TYPE_SHORT = {
+  'Исполнительная документация': 'ИД',
+  'ППР': 'ППР',
+  'Акт скрытых работ': 'АОСР',
+  'Журнал работ': 'ЖР',
+  'Входной контроль': 'ВК'
+};
+
+const PTO_STATUSES = [
+  'Черновик',
+  'На проверке',
+  'На согласовании',
+  'Утверждён',
+  'Отклонён',
+  'В архиве'
+];
 
 const modal = document.getElementById('article-modal');
 const modalBody = document.getElementById('modal-body');
@@ -209,6 +244,43 @@ function setupEventListeners() {
     renderRaboty();
   });
 document.getElementById('add-user-form').addEventListener('submit', handleAddUser);
+
+  // === МОДУЛЬ ПТО ===
+  document.getElementById('show-add-doc').addEventListener('click', () => openPtoForm());
+  document.getElementById('export-pto').addEventListener('click', exportPtoRegistry);
+
+  document.getElementById('pto-filter-type').addEventListener('change', (e) => {
+    ptoFilterType = e.target.value;
+    loadPtoDocuments();
+  });
+
+  document.getElementById('pto-filter-object').addEventListener('change', (e) => {
+    ptoFilterObject = e.target.value;
+    loadPtoDocuments();
+  });
+
+  document.getElementById('pto-filter-status').addEventListener('change', (e) => {
+    ptoFilterStatus = e.target.value;
+    loadPtoDocuments();
+  });
+
+  document.getElementById('pto-filter-overdue').addEventListener('change', (e) => {
+    ptoOnlyOverdue = e.target.checked;
+    loadPtoDocuments();
+  });
+
+  let ptoSearchTimer = null;
+  document.getElementById('pto-search').addEventListener('input', (e) => {
+    ptoSearch = e.target.value.trim();
+    clearTimeout(ptoSearchTimer);
+    ptoSearchTimer = setTimeout(loadPtoDocuments, 250);
+  });
+
+  document.getElementById('show-add-object').addEventListener('click', () => {
+    document.getElementById('add-object-form').classList.toggle('hidden');
+  });
+
+  document.getElementById('add-object-form').addEventListener('submit', handleAddObject);
   
   // Модальное окно
   modalClose.addEventListener('click', closeModal);
@@ -324,6 +396,9 @@ async function showApp() {
   await loadVidyRabot();
   await loadRaboty();
   await loadArticles();
+  await loadPtoObjects();
+  await loadPtoDocuments();
+  applyPtoPermissions();
 
   if (!currentUser) return;
   navigateTo('catalog');
@@ -341,12 +416,20 @@ function navigateTo(page) {
   vidyRabotPage.classList.add('hidden');
   rabotyPage.classList.add('hidden');
   usersPage.classList.add('hidden');
-  
+  ptoPage.classList.add('hidden');
+
   const canManageWork = currentUser.role === 'Администратор' || currentUser.role === 'Старший монтажник';
 
   switch (page) {
     case 'catalog':
       catalogPage.classList.remove('hidden');
+      break;
+    case 'pto':
+      ptoPage.classList.remove('hidden');
+      loadPtoObjects();
+      renderPtoStats();
+      renderPtoTable();
+      renderObjects();
       break;
     case 'add-article':
       if (canManageWork) {
@@ -948,6 +1031,7 @@ function renderUsers() {
           <select class="role-select" id="role-select-${user.id}">
             <option value="Монтажник" ${user.role === 'Монтажник' ? 'selected' : ''}>Монтажник</option>
             <option value="Старший монтажник" ${user.role === 'Старший монтажник' ? 'selected' : ''}>Старший монтажник</option>
+            <option value="Инженер ПТО" ${user.role === 'Инженер ПТО' ? 'selected' : ''}>Инженер ПТО</option>
             <option value="Администратор" ${user.role === 'Администратор' ? 'selected' : ''}>Администратор</option>
           </select>
           <div class="confirm-btns">
@@ -1319,6 +1403,612 @@ async function confirmDeleteRabota(id) {
   }
 }
 
+// === МОДУЛЬ ПТО ==========================================================
+
+function canManagePto() {
+  return Boolean(currentUser) &&
+    (currentUser.role === 'Администратор' || currentUser.role === 'Инженер ПТО');
+}
+
+function applyPtoPermissions() {
+  const allowed = canManagePto();
+
+  document.getElementById('show-add-doc').classList.toggle('hidden', !allowed);
+  document.getElementById('show-add-object').classList.toggle('hidden', !allowed);
+
+  if (!allowed) {
+    document.getElementById('add-object-form').classList.add('hidden');
+  }
+}
+
+function ptoStatusClass(status) {
+  switch (status) {
+    case 'Черновик': return 'draft';
+    case 'На проверке': return 'check';
+    case 'На согласовании': return 'review';
+    case 'Утверждён': return 'approved';
+    case 'Отклонён': return 'rejected';
+    case 'В архиве': return 'archived';
+    default: return 'draft';
+  }
+}
+
+function todayIso() {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0')
+  ].join('-');
+}
+
+function isPtoOverdue(doc) {
+  if (!doc.dueDate) return false;
+  if (doc.status === 'Утверждён' || doc.status === 'В архиве') return false;
+
+  return String(doc.dueDate).slice(0, 10) < todayIso();
+}
+
+function formatDateTime(value) {
+  if (!value) return '—';
+
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  return match ? `${match[3]}.${match[2]}.${match[1]} ${match[4]}:${match[5]}` : formatDate(value);
+}
+
+async function loadPtoObjects() {
+  try {
+    const response = await apiFetch(`${API_BASE}/objects`);
+    const data = await response.json();
+    ptoObjects = data.data || [];
+  } catch (error) {
+    if (isAuthError(error)) return;
+    console.error('Ошибка загрузки объектов:', error);
+    ptoObjects = [];
+  }
+
+  renderPtoFilterOptions();
+  renderObjects();
+}
+
+async function loadPtoDocuments() {
+  const params = new URLSearchParams();
+
+  if (ptoFilterType !== 'all') params.set('type', ptoFilterType);
+  if (ptoFilterObject !== 'all') params.set('objectId', ptoFilterObject);
+  if (ptoFilterStatus !== 'all') params.set('status', ptoFilterStatus);
+  if (ptoSearch) params.set('q', ptoSearch);
+  if (ptoOnlyOverdue) params.set('overdue', '1');
+
+  // Номер запроса отсекает устаревшие ответы, если фильтры меняли быстро.
+  const requestId = ++ptoLoadRequestId;
+
+  try {
+    const response = await apiFetch(`${API_BASE}/pto?${params.toString()}`);
+    const data = await response.json();
+
+    if (requestId !== ptoLoadRequestId) return;
+
+    ptoDocuments = data.data || [];
+  } catch (error) {
+    if (isAuthError(error)) return;
+    if (requestId !== ptoLoadRequestId) return;
+    console.error('Ошибка загрузки документов ПТО:', error);
+    ptoDocuments = [];
+  }
+
+  renderPtoStats();
+  renderPtoTable();
+}
+
+function renderPtoFilterOptions() {
+  const typeSelect = document.getElementById('pto-filter-type');
+  typeSelect.innerHTML = '<option value="all">Все типы документов</option>' +
+    PTO_TYPES.map(type => `<option value="${escapeAttr(type)}">${escapeHtml(type)}</option>`).join('');
+  typeSelect.value = ptoFilterType;
+
+  const objectSelect = document.getElementById('pto-filter-object');
+  objectSelect.innerHTML = '<option value="all">Все объекты</option>' +
+    ptoObjects.map(object => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('');
+  objectSelect.value = ptoFilterObject;
+
+  const statusSelect = document.getElementById('pto-filter-status');
+  statusSelect.innerHTML = '<option value="all">Все статусы</option>' +
+    PTO_STATUSES.map(status => `<option value="${escapeAttr(status)}">${escapeHtml(status)}</option>`).join('');
+  statusSelect.value = ptoFilterStatus;
+}
+
+function renderPtoStats() {
+  const container = document.getElementById('pto-stats');
+  if (!container) return;
+
+  const total = ptoDocuments.length;
+  const inWork = ptoDocuments.filter(doc =>
+    doc.status === 'На проверке' || doc.status === 'На согласовании').length;
+  const approved = ptoDocuments.filter(doc => doc.status === 'Утверждён').length;
+  const overdue = ptoDocuments.filter(isPtoOverdue).length;
+
+  container.innerHTML = `
+    <div class="stat-card">
+      <div class="number">${total}</div>
+      <div class="label">Найдено документов</div>
+    </div>
+    <div class="stat-card">
+      <div class="number blue">${inWork}</div>
+      <div class="label">В работе</div>
+    </div>
+    <div class="stat-card">
+      <div class="number green">${approved}</div>
+      <div class="label">Утверждено</div>
+    </div>
+    <div class="stat-card">
+      <div class="number ${overdue ? 'red' : 'yellow'}">${overdue}</div>
+      <div class="label">Просрочено</div>
+    </div>
+  `;
+}
+
+function renderPtoTable() {
+  const container = document.getElementById('pto-list');
+  const emptyState = document.getElementById('pto-empty');
+
+  if (!container) return;
+
+  if (ptoDocuments.length === 0) {
+    container.innerHTML = '';
+    emptyState.classList.remove('hidden');
+    return;
+  }
+
+  emptyState.classList.add('hidden');
+
+  container.innerHTML = ptoDocuments.map(doc => {
+    const overdue = isPtoOverdue(doc);
+    const shortType = PTO_TYPE_SHORT[doc.type] || doc.type;
+    const revision = Number(doc.version) > 1 ? ` · ред. ${doc.version}` : '';
+
+    return `
+      <tr class="pto-row ${overdue ? 'pto-row-overdue' : ''}">
+        <td><span class="pto-type-chip" title="${escapeAttr(doc.type)}">${escapeHtml(shortType)}</span></td>
+        <td>
+          <button type="button" class="pto-doc-title" onclick="openPtoDoc(${doc.id})">${escapeHtml(doc.title)}</button>
+          <div class="pto-doc-sub">${escapeHtml(doc.cipher || 'без шифра')}${revision}</div>
+        </td>
+        <td>${escapeHtml(doc.objectName || '—')}</td>
+        <td>${escapeHtml(doc.projectSection || '—')}</td>
+        <td><span class="status-badge ${ptoStatusClass(doc.status)}">${escapeHtml(doc.status)}</span></td>
+        <td class="${overdue ? 'pto-overdue' : ''}">${formatDate(doc.dueDate)}</td>
+        <td>${escapeHtml(doc.responsible || '—')}</td>
+        <td class="pto-actions">
+          <button type="button" class="action-btn edit" onclick="openPtoDoc(${doc.id})">Открыть</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function openPtoDoc(id) {
+  let doc;
+
+  try {
+    const response = await apiFetch(`${API_BASE}/pto/${id}`);
+    const data = await response.json();
+
+    if (!data.success) {
+      alert('Ошибка: ' + (data.error || 'не удалось открыть документ'));
+      return;
+    }
+
+    doc = data.data;
+  } catch (error) {
+    if (isAuthError(error)) return;
+    alert('Ошибка подключения к серверу');
+    return;
+  }
+
+  const overdue = isPtoOverdue(doc);
+  const canManage = canManagePto();
+  const shortType = PTO_TYPE_SHORT[doc.type] || doc.type;
+
+  const historyHtml = (doc.history || []).map(entry => {
+    const statusDelta = [entry.statusFrom, entry.statusTo].filter(Boolean).join(' → ');
+    const meta = [
+      statusDelta,
+      entry.version ? `ред. ${entry.version}` : '',
+      entry.author || ''
+    ].filter(Boolean).join(' · ');
+
+    return `
+      <li>
+        <div class="pto-history-action">
+          <strong>${escapeHtml(entry.action)}</strong>
+          <span class="pto-history-date">${formatDateTime(entry.date)}</span>
+        </div>
+        ${meta ? `<div class="pto-history-meta">${escapeHtml(meta)}</div>` : ''}
+        ${entry.comment ? `<div class="pto-history-comment">${escapeHtml(entry.comment)}</div>` : ''}
+      </li>
+    `;
+  }).join('');
+
+  const statusOptions = PTO_STATUSES
+    .filter(status => status !== doc.status)
+    .map(status => `<option value="${escapeAttr(status)}">${escapeHtml(status)}</option>`)
+    .join('');
+
+  openModal(`
+    <div class="pto-detail">
+      <div class="pto-detail-top">
+        <span class="pto-type-chip" title="${escapeAttr(doc.type)}">${escapeHtml(shortType)}</span>
+        <span class="status-badge ${ptoStatusClass(doc.status)}">${escapeHtml(doc.status)}</span>
+        ${overdue ? '<span class="status-badge rejected">Просрочен</span>' : ''}
+      </div>
+
+      <h2>${escapeHtml(doc.title)}</h2>
+
+      <div class="pto-detail-grid">
+        <div><span>Объект</span><strong>${escapeHtml(doc.objectName || '—')}</strong></div>
+        <div><span>Шифр</span><strong>${escapeHtml(doc.cipher || '—')}</strong></div>
+        <div><span>Раздел проекта</span><strong>${escapeHtml(doc.projectSection || '—')}</strong></div>
+        <div><span>Срок</span><strong class="${overdue ? 'pto-overdue' : ''}">${formatDate(doc.dueDate)}</strong></div>
+        <div><span>Ответственный</span><strong>${escapeHtml(doc.responsible || '—')}</strong></div>
+        <div><span>Версия</span><strong>ред. ${doc.version} · ${formatDate(doc.actualizedAt)}</strong></div>
+        <div><span>Автор</span><strong>${escapeHtml(doc.authorName || '—')}</strong></div>
+        <div><span>Обновлён</span><strong>${formatDateTime(doc.updatedAt)}</strong></div>
+      </div>
+
+      ${doc.content ? `<div class="pto-detail-text">${escapeHtml(doc.content)}</div>` : ''}
+
+      ${doc.file ? `
+        <div class="pdf-actions">
+          <a href="${escapeAttr(doc.file)}" target="_blank" rel="noopener" class="pdf-download-btn">📄 Открыть файл</a>
+          <a href="${escapeAttr(doc.file)}" download class="pdf-download-btn">Скачать файл</a>
+        </div>
+      ` : ''}
+
+      ${canManage ? `
+        <div class="pto-status-panel">
+          <h3>Смена статуса</h3>
+          <div class="pto-status-row">
+            <select id="pto-status-select" class="filter-select">${statusOptions}</select>
+            <input type="text" id="pto-status-comment" class="search-input" placeholder="Комментарий (необязательно)">
+            <button type="button" class="btn btn-primary" onclick="changePtoStatus(${doc.id})">Применить</button>
+          </div>
+        </div>
+
+        <div class="article-actions">
+          <button class="btn btn-secondary btn-sm" onclick="openPtoForm(${doc.id})">✏️ Редактировать</button>
+          <button class="btn btn-danger btn-sm" onclick="deletePtoDoc(${doc.id})">Удалить</button>
+        </div>
+      ` : ''}
+
+      <div class="pto-history">
+        <h3>История документа</h3>
+        ${historyHtml
+          ? `<ul class="pto-history-list">${historyHtml}</ul>`
+          : '<p class="card-hint">Записей пока нет</p>'}
+      </div>
+    </div>
+  `);
+}
+
+async function changePtoStatus(id) {
+  const status = document.getElementById('pto-status-select').value;
+  const comment = document.getElementById('pto-status-comment').value.trim();
+
+  try {
+    const response = await apiFetch(`${API_BASE}/pto/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, comment })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      await loadPtoDocuments();
+      await openPtoDoc(id);
+    } else {
+      alert('Ошибка: ' + (data.error || 'не удалось сменить статус'));
+    }
+  } catch (error) {
+    if (isAuthError(error)) return;
+    alert('Ошибка подключения к серверу');
+  }
+}
+
+async function openPtoForm(docId = null) {
+  if (!canManagePto()) return;
+
+  let doc = null;
+
+  if (docId) {
+    try {
+      const response = await apiFetch(`${API_BASE}/pto/${docId}`);
+      const data = await response.json();
+
+      if (!data.success) {
+        alert('Ошибка: ' + (data.error || 'не удалось открыть документ'));
+        return;
+      }
+
+      doc = data.data;
+    } catch (error) {
+      if (isAuthError(error)) return;
+      alert('Ошибка подключения к серверу');
+      return;
+    }
+  }
+
+  const typeOptions = PTO_TYPES.map(type => `
+    <option value="${escapeAttr(type)}" ${doc && doc.type === type ? 'selected' : ''}>${escapeHtml(type)}</option>
+  `).join('');
+
+  const objectOptions = ptoObjects.map(object => `
+    <option value="${object.id}" ${doc && Number(doc.objectId) === Number(object.id) ? 'selected' : ''}>
+      ${escapeHtml(object.name)}
+    </option>
+  `).join('');
+
+  const statusOptions = PTO_STATUSES.map(status => `
+    <option value="${escapeAttr(status)}" ${doc ? (doc.status === status ? 'selected' : '') : (status === 'Черновик' ? 'selected' : '')}>
+      ${escapeHtml(status)}
+    </option>
+  `).join('');
+
+  openModal(`
+    <h2>${doc ? 'Редактировать документ ПТО' : 'Новый документ ПТО'}</h2>
+
+    <form id="pto-doc-form" class="modal-form">
+      <div id="pto-form-error" class="error-message hidden"></div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="pto-form-type">Тип документа <span class="required">*</span></label>
+          <select id="pto-form-type" required>${typeOptions}</select>
+        </div>
+        <div class="form-group">
+          <label for="pto-form-object">Объект</label>
+          <select id="pto-form-object">
+            <option value="">Без объекта</option>
+            ${objectOptions}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="pto-form-title">Наименование <span class="required">*</span></label>
+        <input type="text" id="pto-form-title" value="${escapeAttr(doc ? doc.title : '')}" placeholder="Например: Исполнительная документация по вентиляции" required>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="pto-form-cipher">Шифр</label>
+          <input type="text" id="pto-form-cipher" value="${escapeAttr(doc ? (doc.cipher || '') : '')}" placeholder="2026-ИД-01">
+        </div>
+        <div class="form-group">
+          <label for="pto-form-section">Раздел проекта</label>
+          <input type="text" id="pto-form-section" value="${escapeAttr(doc ? (doc.projectSection || '') : '')}" placeholder="ОВ, КЖ, ЭОМ">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="pto-form-status">Статус</label>
+          <select id="pto-form-status">${statusOptions}</select>
+        </div>
+        <div class="form-group">
+          <label for="pto-form-due">Срок</label>
+          <input type="date" id="pto-form-due" value="${escapeAttr(doc ? (doc.dueDate || '') : '')}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="pto-form-responsible">Ответственный</label>
+        <input type="text" id="pto-form-responsible" value="${escapeAttr(doc ? (doc.responsible || '') : '')}" placeholder="ФИО инженера ПТО">
+      </div>
+
+      <div class="form-group">
+        <label for="pto-form-content">Описание</label>
+        <textarea id="pto-form-content" rows="5" placeholder="Что входит в документ, замечания, комментарии">${escapeHtml(doc ? (doc.content || '') : '')}</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="pto-form-file">Файл документа (PDF, DOC, DOCX, XLS, XLSX)</label>
+        <input type="file" id="pto-form-file" accept=".pdf,.doc,.docx,.xls,.xlsx" class="pto-file-input">
+        <p class="file-hint">Максимальный размер: 20 МБ${doc && doc.file ? ' · текущий файл сохранится, если не выбрать новый' : ''}</p>
+      </div>
+
+      ${doc ? `
+        <label class="pto-checkbox">
+          <input type="checkbox" id="pto-form-revision">
+          <span>Отметить как новую редакцию (версия ${Number(doc.version) + 1})</span>
+        </label>
+      ` : ''}
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">${doc ? 'Сохранить изменения' : 'Добавить документ'}</button>
+      </div>
+    </form>
+  `);
+
+  document.getElementById('pto-doc-form').addEventListener('submit', (e) => handlePtoSubmit(e, doc));
+}
+
+async function handlePtoSubmit(e, doc) {
+  e.preventDefault();
+
+  const errorEl = document.getElementById('pto-form-error');
+  errorEl.classList.add('hidden');
+
+  const type = document.getElementById('pto-form-type').value;
+  const title = document.getElementById('pto-form-title').value.trim();
+
+  if (!title) {
+    showError(errorEl, 'Введите наименование документа');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('type', type);
+  formData.append('title', title);
+  formData.append('objectId', document.getElementById('pto-form-object').value || '');
+  formData.append('cipher', document.getElementById('pto-form-cipher').value.trim());
+  formData.append('projectSection', document.getElementById('pto-form-section').value.trim());
+  formData.append('status', document.getElementById('pto-form-status').value);
+  formData.append('dueDate', document.getElementById('pto-form-due').value || '');
+  formData.append('responsible', document.getElementById('pto-form-responsible').value.trim());
+  formData.append('content', document.getElementById('pto-form-content').value.trim());
+
+  const fileInput = document.getElementById('pto-form-file');
+  if (fileInput.files[0]) {
+    formData.append('docFile', fileInput.files[0]);
+  }
+
+  if (doc) {
+    const revisionInput = document.getElementById('pto-form-revision');
+    formData.append('newRevision', revisionInput && revisionInput.checked ? 'true' : 'false');
+  }
+
+  try {
+    const response = await apiFetch(doc ? `${API_BASE}/pto/${doc.id}` : `${API_BASE}/pto`, {
+      method: doc ? 'PUT' : 'POST',
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      const savedId = doc ? doc.id : data.data.id;
+      closeModal();
+      await loadPtoDocuments();
+      await openPtoDoc(savedId);
+    } else {
+      showError(errorEl, data.error || 'Не удалось сохранить документ');
+    }
+  } catch (error) {
+    if (isAuthError(error)) return;
+    showError(errorEl, 'Ошибка подключения к серверу');
+  }
+}
+
+async function deletePtoDoc(id) {
+  if (!confirm('Удалить документ ПТО? Записи истории документа тоже будут удалены.')) return;
+
+  try {
+    const response = await apiFetch(`${API_BASE}/pto/${id}`, { method: 'DELETE' });
+    const data = await response.json();
+
+    if (data.success) {
+      closeModal();
+      await loadPtoDocuments();
+    } else {
+      alert('Ошибка: ' + (data.error || 'не удалось удалить документ'));
+    }
+  } catch (error) {
+    if (isAuthError(error)) return;
+    alert('Ошибка подключения к серверу');
+  }
+}
+
+function exportPtoRegistry() {
+  const params = new URLSearchParams();
+
+  if (ptoFilterType !== 'all') params.set('type', ptoFilterType);
+  if (ptoFilterObject !== 'all') params.set('objectId', ptoFilterObject);
+  if (ptoFilterStatus !== 'all') params.set('status', ptoFilterStatus);
+  if (ptoSearch) params.set('q', ptoSearch);
+  if (ptoOnlyOverdue) params.set('overdue', '1');
+
+  const query = params.toString();
+  window.location.href = `${API_BASE}/pto/export.csv${query ? '?' + query : ''}`;
+}
+
+function renderObjects() {
+  const container = document.getElementById('objects-list');
+  if (!container) return;
+
+  if (ptoObjects.length === 0) {
+    container.innerHTML = '<p class="card-hint">Объекты пока не добавлены</p>';
+    return;
+  }
+
+  container.innerHTML = ptoObjects.map(object => {
+    const details = [object.address, object.customer].filter(Boolean).map(value => escapeHtml(value)).join(' · ');
+
+    return `
+      <div class="object-row">
+        <div class="object-main">
+          <strong>${escapeHtml(object.name)}</strong>
+          <span>${details || 'адрес и заказчик не указаны'}</span>
+        </div>
+        <span class="object-count">${object.documentsCount} док.</span>
+        ${canManagePto() ? `<button type="button" class="action-btn delete" onclick="deleteObject(${object.id})">Удалить</button>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+async function handleAddObject(e) {
+  e.preventDefault();
+
+  const errorEl = document.getElementById('object-form-error');
+  const successEl = document.getElementById('object-form-success');
+  errorEl.classList.add('hidden');
+  successEl.classList.add('hidden');
+
+  const name = document.getElementById('new-object-name').value.trim();
+  const address = document.getElementById('new-object-address').value.trim();
+  const customer = document.getElementById('new-object-customer').value.trim();
+
+  if (!name) {
+    showError(errorEl, 'Введите название объекта');
+    return;
+  }
+
+  try {
+    const response = await apiFetch(`${API_BASE}/objects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, address, customer })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      successEl.textContent = 'Объект добавлен';
+      successEl.classList.remove('hidden');
+      document.getElementById('new-object-name').value = '';
+      document.getElementById('new-object-address').value = '';
+      document.getElementById('new-object-customer').value = '';
+      await loadPtoObjects();
+    } else {
+      showError(errorEl, data.error || 'Не удалось добавить объект');
+    }
+  } catch (error) {
+    if (isAuthError(error)) return;
+    showError(errorEl, 'Ошибка подключения к серверу');
+  }
+}
+
+async function deleteObject(id) {
+  if (!confirm('Удалить объект? Удалить можно только объект без документов.')) return;
+
+  try {
+    const response = await apiFetch(`${API_BASE}/objects/${id}`, { method: 'DELETE' });
+    const data = await response.json();
+
+    if (data.success) {
+      await loadPtoObjects();
+      await loadPtoDocuments();
+    } else {
+      alert('Ошибка: ' + (data.error || 'не удалось удалить объект'));
+    }
+  } catch (error) {
+    if (isAuthError(error)) return;
+    alert('Ошибка подключения к серверу');
+  }
+}
+
 function showError(element, message) {
   element.textContent = message;
   element.classList.remove('hidden');
@@ -1353,6 +2043,7 @@ function getRoleClass(role) {
   switch (role) {
     case 'Администратор': return 'admin';
     case 'Старший монтажник': return 'senior';
+    case 'Инженер ПТО': return 'pto';
     case 'Монтажник': return 'worker';
     default: return '';
   }
@@ -1362,6 +2053,7 @@ function getRoleIcon(role) {
   switch (role) {
     case 'Администратор': return '';
     case 'Старший монтажник': return '';
+    case 'Инженер ПТО': return '';
     case 'Монтажник': return '';
     default: return '';
   }
