@@ -1,4 +1,8 @@
+// Клиентская логика: авторизация, каталог знаний, документы ПТО,
+// комплектность ИД, замечания, отчёты, уведомления и профиль.
 const API_BASE = '/api';
+
+const ROLES = ['Монтажник', 'Старший монтажник', 'Инженер ПТО', 'Администратор'];
 
 class AuthError extends Error {
   constructor(status, message) {
@@ -8,324 +12,178 @@ class AuthError extends Error {
   }
 }
 
-function isAuthError(error) {
-  return error instanceof AuthError;
+const state = {
+  user: null,
+  csrfToken: '',
+  permissions: { admin: false, content: false, pto: false },
+  vidy: [],
+  raboty: [],
+  articles: [],
+  objects: [],
+  ptoMeta: { types: [], statuses: [], closedStatuses: [], objects: [], canManage: false },
+  ptoDocs: [],
+  users: [],
+  objectsForAdmin: [],
+  remarkStatuses: [],
+  remarks: [],
+  report: null,
+  searchQuery: '',
+  filterVid: 'all',
+  ptoFilters: { type: 'all', objectId: 'all', status: 'all', q: '', overdue: false },
+  remarkFilters: { status: 'all', objectId: 'all', q: '', overdue: false },
+  ptoLoadId: 0
+};
+
+const $ = (id) => document.getElementById(id);
+
+// --- Утилиты ---
+
+function escapeHtml(text) {
+  if (text === null || text === undefined) return '';
+  const div = document.createElement('div');
+  div.textContent = String(text);
+  return div.innerHTML;
 }
 
-function forceLogin(message) {
-  closeMobileMenu();
-  closeModal();
+function escapeAttr(text) {
+  return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
-  currentUser = null;
-  sessionStorage.removeItem('current_user');
-  appPage.classList.add('hidden');
-  loginPage.classList.remove('hidden');
-  document.getElementById('password').value = '';
+function formatDate(value) {
+  if (!value) return '—';
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : String(value);
+}
 
-  if (message) {
-    showError(loginError, message);
-  } else {
-    loginError.classList.add('hidden');
+function formatDateTime(value) {
+  if (!value) return '—';
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  return match ? `${match[3]}.${match[2]}.${match[1]} ${match[4]}:${match[5]}` : formatDate(value);
+}
+
+function todayIso() {
+  const now = new Date();
+  return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+}
+
+function toast(message, type = 'ok') {
+  let container = document.querySelector('.toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
   }
 
-  window.scrollTo(0, 0);
+  const item = document.createElement('div');
+  item.className = `toast ${type === 'error' ? 'error' : ''}`;
+  item.textContent = message;
+  container.appendChild(item);
+  setTimeout(() => item.remove(), type === 'error' ? 7000 : 4000);
 }
 
-function openMobileMenu() {
-  mobileMenu.classList.add('open');
-  mobileMenuOverlay.classList.add('open');
-  mobileMenu.setAttribute('aria-hidden', 'false');
-  navToggle.setAttribute('aria-expanded', 'true');
-  document.body.classList.add('menu-open');
+function showError(element, message) {
+  if (!element) return;
+  element.textContent = message;
+  element.classList.remove('hidden');
 }
 
-function closeMobileMenu() {
-  mobileMenu.classList.remove('open');
-  mobileMenuOverlay.classList.remove('open');
-  mobileMenu.setAttribute('aria-hidden', 'true');
-  navToggle.setAttribute('aria-expanded', 'false');
-  document.body.classList.remove('menu-open');
-}
-
-function openModal(html) {
-  modalBody.innerHTML = html;
-  modal.classList.remove('hidden');
-  document.body.classList.add('modal-open');
-}
-
-function closeModal() {
-  modal.classList.add('hidden');
-  modalBody.innerHTML = '';
-  document.body.classList.remove('modal-open');
-}
+// --- Сеть ---
 
 async function apiFetch(url, options = {}) {
-  const response = await fetch(url, {
-    credentials: 'same-origin',
-    ...options
-  });
+  const headers = { ...(options.headers || {}) };
+  if (state.csrfToken) headers['X-CSRF-Token'] = state.csrfToken;
 
+  const response = await fetch(url, { credentials: 'same-origin', ...options, headers });
   if (response.status === 401) {
     forceLogin('Сессия истекла, войдите заново');
     throw new AuthError(401, 'Требуется авторизация');
   }
-
-  if (response.status === 403) {
-    forceLogin('У вас нет прав для этого действия');
-    throw new AuthError(403, 'Недостаточно прав');
-  }
-
   return response;
 }
 
+async function apiJson(url, options = {}) {
+  const response = await apiFetch(url, options);
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { success: false, error: text }; }
 
-let currentUser = null;
-let articles = [];
-let users = [];
-let vidyRabot = [];
-let raboty = [];
-let searchQuery = '';
-let filterVid = 'all';
-
-
-const loginPage = document.getElementById('login-page');
-const appPage = document.getElementById('app-page');
-const loginForm = document.getElementById('login-form');
-const loginError = document.getElementById('login-error');
-const logoutBtn = document.getElementById('logout-btn');
-
-const catalogPage = document.getElementById('catalog-page');
-const addArticlePage = document.getElementById('add-article-page');
-const vidyRabotPage = document.getElementById('vidy-rabot-page');
-const rabotyPage = document.getElementById('raboty-page');
-const usersPage = document.getElementById('users-page');
-const ptoPage = document.getElementById('pto-page');
-
-const navToggle = document.getElementById('nav-toggle');
-const mobileMenu = document.getElementById('mobile-menu');
-const mobileMenuOverlay = document.getElementById('mobile-menu-overlay');
-const mobileMenuClose = document.getElementById('mobile-menu-close');
-const mobileLogoutBtn = document.getElementById('mobile-logout-btn');
-const mobileUserName = document.getElementById('mobile-user-name');
-const mobileUserRole = document.getElementById('mobile-user-role');
-
-let searchRaboty = '';
-let filterRabotyVid = 'all';
-
-let ptoDocuments = [];
-let ptoObjects = [];
-let ptoFilterType = 'all';
-let ptoFilterObject = 'all';
-let ptoFilterStatus = 'all';
-let ptoSearch = '';
-let ptoOnlyOverdue = false;
-let ptoLoadRequestId = 0;
-
-const PTO_TYPES = [
-  'Исполнительная документация',
-  'ППР',
-  'Акт скрытых работ',
-  'Журнал работ',
-  'Входной контроль'
-];
-
-const PTO_TYPE_SHORT = {
-  'Исполнительная документация': 'ИД',
-  'ППР': 'ППР',
-  'Акт скрытых работ': 'АОСР',
-  'Журнал работ': 'ЖР',
-  'Входной контроль': 'ВК'
-};
-
-const PTO_STATUSES = [
-  'Черновик',
-  'На проверке',
-  'На согласовании',
-  'Утверждён',
-  'Отклонён',
-  'В архиве'
-];
-
-const modal = document.getElementById('article-modal');
-const modalBody = document.getElementById('modal-body');
-const modalClose = document.getElementById('modal-close');
-
-
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('current-year').textContent = new Date().getFullYear();
-
-  const savedUser = sessionStorage.getItem('current_user');
-  if (savedUser) {
-    currentUser = JSON.parse(savedUser);
-    showApp();
+  if (!response.ok) {
+    const error = new Error((data && data.error) || `Ошибка ${response.status}`);
+    error.status = response.status;
+    error.details = data && data.details;
+    error.requestId = data && data.requestId;
+    throw error;
   }
-  
-  setupEventListeners();
-});
 
-
-function setupEventListeners() {
-  loginForm.addEventListener('submit', handleLogin);
-  logoutBtn.addEventListener('click', handleLogout);
-  
-  document.getElementById('toggle-password').addEventListener('click', () => {
-    const passInput = document.getElementById('password');
-    const btn = document.getElementById('toggle-password');
-    if (passInput.type === 'password') {
-      passInput.type = 'text';
-      btn.textContent = '✕';
-    } else {
-      passInput.type = 'password';
-      btn.textContent = '👁️';
-    }
-  });
-  
-  document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      navigateTo(btn.dataset.page);
-      closeMobileMenu();
-    });
-  });
-
-  navToggle.addEventListener('click', openMobileMenu);
-  mobileMenuClose.addEventListener('click', closeMobileMenu);
-  mobileMenuOverlay.addEventListener('click', closeMobileMenu);
-  mobileLogoutBtn.addEventListener('click', handleLogout);
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      closeMobileMenu();
-      closeModal();
-    }
-  });
-
-  window.addEventListener('resize', () => {
-    if (window.innerWidth > 768) {
-      closeMobileMenu();
-    }
-  });
-  
-  document.getElementById('search-input').addEventListener('input', (e) => {
-    searchQuery = e.target.value.toLowerCase();
-    renderArticles();
-  });
-  
-  document.getElementById('filter-vid').addEventListener('change', (e) => {
-    filterVid = e.target.value;
-    renderArticles();
-  });
-  
-  document.getElementById('article-form').addEventListener('submit', handleAddArticle);
-  document.getElementById('article-content').addEventListener('input', (e) => {
-    document.getElementById('char-count').textContent = e.target.value.length;
-  });
-  
-  document.getElementById('show-add-user').addEventListener('click', () => {
-    document.getElementById('add-user-form-container').classList.toggle('hidden');
-  });
-
-  document.getElementById('show-add-vid').addEventListener('click', () => {
-    document.getElementById('add-vid-form-container').classList.toggle('hidden');
-  });
-  document.getElementById('add-vid-form').addEventListener('submit', handleAddVidRabot);
-
-  document.getElementById('show-add-rabota').addEventListener('click', () => {
-    document.getElementById('add-rabota-form-container').classList.toggle('hidden');
-    populateVidSelectForRabota();
-  });
-  document.getElementById('add-rabota-form').addEventListener('submit', handleAddRabota);
-  
-  document.getElementById('filter-raboty-vid').addEventListener('change', (e) => {
-    filterRabotyVid = e.target.value;
-    renderRaboty();
-  });
-  document.getElementById('search-raboty').addEventListener('input', (e) => {
-    searchRaboty = e.target.value.toLowerCase();
-    renderRaboty();
-  });
-document.getElementById('add-user-form').addEventListener('submit', handleAddUser);
-
-  // === МОДУЛЬ ПТО ===
-  document.getElementById('show-add-doc').addEventListener('click', () => openPtoForm());
-  document.getElementById('export-pto').addEventListener('click', exportPtoRegistry);
-
-  document.getElementById('pto-filter-type').addEventListener('change', (e) => {
-    ptoFilterType = e.target.value;
-    loadPtoDocuments();
-  });
-
-  document.getElementById('pto-filter-object').addEventListener('change', (e) => {
-    ptoFilterObject = e.target.value;
-    loadPtoDocuments();
-  });
-
-  document.getElementById('pto-filter-status').addEventListener('change', (e) => {
-    ptoFilterStatus = e.target.value;
-    loadPtoDocuments();
-  });
-
-  document.getElementById('pto-filter-overdue').addEventListener('change', (e) => {
-    ptoOnlyOverdue = e.target.checked;
-    loadPtoDocuments();
-  });
-
-  let ptoSearchTimer = null;
-  document.getElementById('pto-search').addEventListener('input', (e) => {
-    ptoSearch = e.target.value.trim();
-    clearTimeout(ptoSearchTimer);
-    ptoSearchTimer = setTimeout(loadPtoDocuments, 250);
-  });
-
-  document.getElementById('show-add-object').addEventListener('click', () => {
-    document.getElementById('add-object-form').classList.toggle('hidden');
-  });
-
-  document.getElementById('add-object-form').addEventListener('submit', handleAddObject);
-  
-  // Модальное окно
-  modalClose.addEventListener('click', closeModal);
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) closeModal();
-  });
-  
-  // === ЗАГРУЗКА PDF-ФАЙЛА ===
-  const pdfInput = document.getElementById('article-pdf');
-  const fileUploadLabel = document.querySelector('.file-upload-label');
-  const fileUploadText = document.getElementById('file-upload-text');
-  const clearPdfBtn = document.getElementById('clear-pdf');
-  
-  pdfInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      fileUploadText.textContent = `📄 ${file.name}`;
-      fileUploadLabel.classList.add('has-file');
-      clearPdfBtn.classList.remove('hidden');
-    }
-  });
-  
-  clearPdfBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    pdfInput.value = '';
-    fileUploadText.textContent = 'Выберите PDF-файл или перетащите сюда';
-    fileUploadLabel.classList.remove('has-file');
-    clearPdfBtn.classList.add('hidden');
-  });
+  return data;
 }
 
-async function handleLogin(e) {
-  e.preventDefault();
-  
-  const tabNumber = document.getElementById('tab-number').value.trim();
-  const password = document.getElementById('password').value;
-  
-  loginError.classList.add('hidden');
-  
+async function apiJsonSafe(url, options = {}) {
+  try {
+    return await apiJson(url, options);
+  } catch (error) {
+    if (error instanceof AuthError) return null;
+    console.error('API error', url, error.message);
+    toast(error.message, 'error');
+    return null;
+  }
+}
+
+// --- Авторизация ---
+
+function forceLogin(message) {
+  state.user = null;
+  state.csrfToken = '';
+  sessionStorage.removeItem('current_user');
+  $('app-page').classList.add('hidden');
+  $('login-page').classList.remove('hidden');
+  $('password').value = '';
+  if (message) showError($('login-error'), message);
+  window.scrollTo(0, 0);
+}
+
+function applyRoleVisibility() {
+  const role = state.user ? state.user.role : '';
+  const canManageContent = ['Администратор', 'Старший монтажник'].includes(role);
+  const canManagePto = ['Администратор', 'Инженер ПТО'].includes(role);
+  const isAdmin = role === 'Администратор';
+
+  document.querySelectorAll('.nav-btn').forEach((button) => {
+    const page = button.dataset.page;
+    if (page === 'add-article' || page === 'vidy-rabot' || page === 'raboty') {
+      button.classList.toggle('hidden', !canManageContent);
+    }
+    if (page === 'users') button.classList.toggle('hidden', !isAdmin);
+  });
+
+  $('show-add-doc').classList.toggle('hidden', !canManagePto);
+  $('show-import').classList.toggle('hidden', !canManagePto);
+  $('show-add-object').classList.toggle('hidden', !canManagePto);
+  $('show-add-set').classList.toggle('hidden', !canManagePto);
+  $('show-add-remark').classList.toggle('hidden', !canManagePto);
+}
+
+function renderUserHeader() {
+  if (!state.user) return;
+  $('user-name').textContent = state.user.fullName;
+  $('user-role').textContent = state.user.role;
+  $('mobile-user-name').textContent = state.user.fullName;
+  $('mobile-user-role').textContent = state.user.role;
+  $('article-author').textContent = state.user.fullName;
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  $('login-error').classList.add('hidden');
+
+  const tabNumber = $('tab-number').value.trim();
+  const password = $('password').value;
+
   if (!tabNumber || !password) {
-    showError(loginError, 'Введите табельный номер и пароль');
+    showError($('login-error'), 'Введите табельный номер и пароль');
     return;
   }
-  
+
   try {
     const response = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
@@ -333,19 +191,26 @@ async function handleLogin(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tabNumber, password })
     });
-    
+
     const data = await response.json();
-    
-    if (data.success) {
-      currentUser = data.user;
-      sessionStorage.setItem('current_user', JSON.stringify(currentUser));
-      showApp();
-    } else {
-      showError(loginError, data.error || 'Ошибка авторизации');
+
+    if (!response.ok || !data.success) {
+      showError($('login-error'), data.error || 'Ошибка авторизации');
+      return;
     }
+
+    state.user = data.user;
+    state.csrfToken = data.csrfToken || '';
+    state.permissions = data.permissions || {
+      admin: data.user.role === 'Администратор',
+      content: ['Администратор', 'Старший монтажник'].includes(data.user.role),
+      pto: ['Администратор', 'Инженер ПТО'].includes(data.user.role)
+    };
+    sessionStorage.setItem('current_user', JSON.stringify(data.user));
+    await showApp();
   } catch (error) {
     console.error('Ошибка авторизации:', error);
-    showError(loginError, 'Ошибка подключения к серверу. Попробуйте позже.');
+    showError($('login-error'), 'Ошибка подключения к серверу. Попробуйте позже.');
   }
 }
 
@@ -353,7 +218,8 @@ async function handleLogout() {
   try {
     await fetch(`${API_BASE}/auth/logout`, {
       method: 'POST',
-      credentials: 'same-origin'
+      credentials: 'same-origin',
+      headers: state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {}
     });
   } catch (error) {
     console.error('Ошибка выхода:', error);
@@ -362,210 +228,148 @@ async function handleLogout() {
   forceLogin(null);
 }
 
-
 async function showApp() {
-  loginPage.classList.add('hidden');
-  appPage.classList.remove('hidden');
-  
-  document.getElementById('user-name').textContent = currentUser.fullName;
-  const roleEl = document.getElementById('user-role');
-  roleEl.textContent = currentUser.role;
-  roleEl.className = 'user-role ' + getRoleClass(currentUser.role);
-  
-  const isAdmin = currentUser.role === 'Администратор';
-  const isSenior = currentUser.role === 'Старший монтажник';
-  const canManageWork = isAdmin || isSenior;
+  $('login-page').classList.add('hidden');
+  $('app-page').classList.remove('hidden');
 
-  document.querySelectorAll('.nav-btn').forEach(btn => {
-    const page = btn.dataset.page;
+  renderUserHeader();
+  applyRoleVisibility();
 
-    if (page === 'add-article' || page === 'vidy-rabot' || page === 'raboty') {
-      btn.classList.toggle('hidden', !canManageWork);
-    }
-
-    if (page === 'users') {
-      btn.classList.toggle('hidden', !isAdmin);
-    }
-  });
-  
-  document.getElementById('article-author').textContent = currentUser.fullName;
-  mobileUserName.textContent = currentUser.fullName;
-  mobileUserRole.textContent = currentUser.role;
-  mobileUserRole.className = 'mobile-user-role ' + getRoleClass(currentUser.role);
-  
-  await loadVidyRabot();
-  await loadRaboty();
-  await loadArticles();
+  await Promise.all([loadVidyRabot(), loadRaboty(), loadArticles(), loadPtoMeta()]);
   await loadPtoObjects();
-  await loadPtoDocuments();
-  applyPtoPermissions();
 
-  if (!currentUser) return;
-  navigateTo('catalog');
+  navigateTo('dashboard');
+  refreshNotificationBadge();
 }
 
-function navigateTo(page) {
-  if (!currentUser) return;
+// --- Навигация ---
 
-  document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.page === page);
+const PAGES = {
+  dashboard: 'dashboard-page',
+  pto: 'pto-page',
+  completeness: 'completeness-page',
+  remarks: 'remarks-page',
+  reports: 'reports-page',
+  catalog: 'catalog-page',
+  'add-article': 'add-article-page',
+  'vidy-rabot': 'vidy-rabot-page',
+  raboty: 'raboty-page',
+  users: 'users-page'
+};
+
+async function navigateTo(page) {
+  if (!state.user) return;
+
+  document.querySelectorAll('.nav-btn').forEach((button) => {
+    button.classList.toggle('active', button.dataset.page === page);
   });
-  
-  catalogPage.classList.add('hidden');
-  addArticlePage.classList.add('hidden');
-  vidyRabotPage.classList.add('hidden');
-  rabotyPage.classList.add('hidden');
-  usersPage.classList.add('hidden');
-  ptoPage.classList.add('hidden');
 
-  const canManageWork = currentUser.role === 'Администратор' || currentUser.role === 'Старший монтажник';
+  Object.values(PAGES).forEach((id) => $(id).classList.add('hidden'));
+
+  const target = PAGES[page] || PAGES.dashboard;
+  $(target).classList.remove('hidden');
 
   switch (page) {
-    case 'catalog':
-      catalogPage.classList.remove('hidden');
+    case 'dashboard':
+      await loadDashboard();
       break;
     case 'pto':
-      ptoPage.classList.remove('hidden');
-      loadPtoObjects();
+      await loadPtoObjects();
       renderPtoStats();
       renderPtoTable();
       renderObjects();
       break;
+    case 'completeness':
+      await loadCompleteness();
+      break;
+    case 'remarks':
+      await loadRemarks();
+      break;
+    case 'reports':
+      await loadReport();
+      break;
+    case 'catalog':
+      renderArticles();
+      break;
     case 'add-article':
-      if (canManageWork) {
-        addArticlePage.classList.remove('hidden');
-        populateRabotySelect();
-      }
+      populateRabotySelect();
       break;
     case 'vidy-rabot':
-      if (canManageWork) {
-        vidyRabotPage.classList.remove('hidden');
-        renderVidyRabot();
-      }
+      renderVidyRabot();
       break;
     case 'raboty':
-      if (canManageWork) {
-        rabotyPage.classList.remove('hidden');
-        populateFilterRabotyVid();
-        renderRaboty();
-      }
+      populateFilterRabotyVid();
+      renderRaboty();
       break;
     case 'users':
-    case 'users':
-      if (currentUser.role === 'Администратор') {
-        usersPage.classList.remove('hidden');
-        loadUsers();
-      }
+      await loadUsers();
+      break;
+    default:
       break;
   }
+
+  window.scrollTo(0, 0);
 }
 
-async function loadVidyRabot() {
-  try {
-    const response = await apiFetch(`${API_BASE}/vidy-rabot`);
-    const data = await response.json();
-    vidyRabot = data.data || [];
+// --- Каталог знаний ---
 
-    const filterSelect = document.getElementById('filter-vid');
-    filterSelect.innerHTML = '<option value="all">Все виды работ</option>';
-    vidyRabot.forEach(vid => {
-      filterSelect.innerHTML += `<option value="${vid.id}">${escapeHtml(vid.name)}</option>`;
-    });
-  } catch (error) {
-    if (isAuthError(error)) return;
-    console.error('Ошибка загрузки видов работ:', error);
-    vidyRabot = [];
+async function loadVidyRabot() {
+  const data = await apiJsonSafe(`${API_BASE}/vidy-rabot`);
+  state.vidy = data ? data.data : [];
+
+  const filter = $('filter-vid');
+  if (filter) {
+    filter.innerHTML = '<option value="all">Все виды работ</option>' +
+      state.vidy.map((vid) => `<option value="${vid.id}">${escapeHtml(vid.name)}</option>`).join('');
   }
 }
 
 async function loadRaboty() {
-  try {
-    const response = await apiFetch(`${API_BASE}/raboty`);
-    const data = await response.json();
-    raboty = data.data || [];
-  } catch (error) {
-    if (isAuthError(error)) return;
-    console.error('Ошибка загрузки работ:', error);
-    raboty = [];
-  }
+  const data = await apiJsonSafe(`${API_BASE}/raboty`);
+  state.raboty = data ? data.data : [];
 }
 
 async function loadArticles() {
-  try {
-    const response = await apiFetch(`${API_BASE}/articles`);
-    const data = await response.json();
-    articles = data.data || [];
-    renderArticles();
-  } catch (error) {
-    if (isAuthError(error)) return;
-    console.error('Ошибка загрузки статей:', error);
-    articles = [];
-    renderArticles();
-  }
-}
-
-async function loadUsers() {
-  try {
-    const response = await apiFetch(`${API_BASE}/sotrudniki`);
-    const data = await response.json();
-    users = data.data || [];
-    renderUsers();
-  } catch (error) {
-    if (isAuthError(error)) return;
-    console.error('Ошибка загрузки сотрудников:', error);
-    users = [];
-    renderUsers();
-  }
+  const data = await apiJsonSafe(`${API_BASE}/articles`);
+  state.articles = data ? data.data : [];
+  renderArticles();
 }
 
 function renderArticles() {
-  const container = document.getElementById('articles-list');
-  const statsContainer = document.getElementById('catalog-stats');
+  const container = $('articles-list');
+  const statsContainer = $('catalog-stats');
+  if (!container) return;
 
-  let filtered = articles.filter(article => {
-    const matchesSearch = 
-      article.title.toLowerCase().includes(searchQuery) ||
-      (article.content && article.content.toLowerCase().includes(searchQuery)) ||
-      (article.keywords && article.keywords.toLowerCase().includes(searchQuery)) ||
-      (article.vidName && article.vidName.toLowerCase().includes(searchQuery)) ||
-      (article.rabotaName && article.rabotaName.toLowerCase().includes(searchQuery));
-    
-    const matchesVid = filterVid === 'all' || 
-      (article.rabotaId && raboty.find(r => r.id === article.rabotaId && r.vidId == filterVid));
-    
+  const query = state.searchQuery.toLowerCase();
+  const filtered = state.articles.filter((article) => {
+    const matchesSearch = !query ||
+      (article.title || '').toLowerCase().includes(query) ||
+      (article.content || '').toLowerCase().includes(query) ||
+      (article.keywords || '').toLowerCase().includes(query) ||
+      (article.vidName || '').toLowerCase().includes(query) ||
+      (article.rabotaName || '').toLowerCase().includes(query);
+
+    const matchesVid = state.filterVid === 'all' ||
+      (article.rabotaId && state.raboty.find((work) => work.id === article.rabotaId && String(work.vidId) === String(state.filterVid)));
+
     return matchesSearch && matchesVid;
   });
 
-  statsContainer.innerHTML = `
-    <div class="stat-card">
-      <div class="number">${articles.length}</div>
-      <div class="label">Всего статей</div>
-    </div>
-    <div class="stat-card">
-      <div class="number blue">${vidyRabot.length}</div>
-      <div class="label">Видов работ</div>
-    </div>
-    <div class="stat-card">
-      <div class="number green">${raboty.length}</div>
-      <div class="label">Работ</div>
-    </div>
-    <div class="stat-card">
-      <div class="number yellow">${filtered.length}</div>
-      <div class="label">Найдено</div>
-    </div>
-  `;
-  
-  if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="no-articles">
-        <h3>Статьи не найдены</h3>
-        <p>Попробуйте изменить параметры поиска или фильтры</p>
-      </div>
+  if (statsContainer) {
+    statsContainer.innerHTML = `
+      <div class="stat-card"><div class="number">${state.articles.length}</div><div class="label">Всего статей</div></div>
+      <div class="stat-card"><div class="number blue">${state.vidy.length}</div><div class="label">Видов работ</div></div>
+      <div class="stat-card"><div class="number green">${state.raboty.length}</div><div class="label">Работ</div></div>
+      <div class="stat-card"><div class="number yellow">${filtered.length}</div><div class="label">Найдено</div></div>
     `;
+  }
+
+  if (!filtered.length) {
+    container.innerHTML = '<div class="no-articles"><h3>Статьи не найдены</h3><p>Попробуйте изменить параметры поиска или фильтры</p></div>';
     return;
   }
-  
-  container.innerHTML = filtered.map(article => `
+
+  container.innerHTML = filtered.map((article) => `
     <div class="article-card" data-id="${article.id}">
       <div class="article-header" onclick="toggleArticle(${article.id})">
         <div class="article-header-content">
@@ -585,32 +389,20 @@ function renderArticles() {
       </div>
       <div class="article-content">
         <div class="article-text">${escapeHtml(article.content || '')}</div>
-        ${article.keywords ? `
-          <div class="article-keywords">
-            ${article.keywords.split(',').map(kw => `<span>${escapeHtml(kw.trim())}</span>`).join('')}
-          </div>
-        ` : ''}
+        ${article.keywords ? `<div class="article-keywords">${article.keywords.split(',').map((word) => `<span>${escapeHtml(word.trim())}</span>`).join('')}</div>` : ''}
         ${article.file ? `
           <div class="pdf-viewer-section">
-            <div class="pdf-viewer-header">
-              <h4>Документ (PDF)</h4>
-            </div>
+            <div class="pdf-viewer-header"><h4>Документ</h4></div>
             <div class="pdf-actions">
-              <a href="${escapeAttr(article.file)}" target="_blank" rel="noopener" class="pdf-download-btn">
-                📄 Открыть инструкцию
-              </a>
-              <a href="${escapeAttr(article.file)}" download class="pdf-download-btn">
-                Скачать PDF
-              </a>
+              <a href="${escapeAttr(article.file)}" target="_blank" rel="noopener" class="pdf-download-btn">📄 Открыть файл</a>
+              <a href="${escapeAttr(article.file)}" download class="pdf-download-btn">Скачать</a>
             </div>
-          </div>
-        ` : ''}
-        ${canManageContent() ? `
+          </div>` : ''}
+        ${state.permissions.content ? `
           <div class="article-actions">
             <button class="btn btn-secondary btn-sm" onclick="openEditArticle(${article.id})">✏️ Редактировать</button>
-            ${currentUser.role === 'Администратор' ? `<button class="btn btn-danger btn-sm" onclick="confirmDeleteArticle(${article.id})">Удалить</button>` : ''}
-          </div>
-        ` : ''}
+            ${state.permissions.admin ? `<button class="btn btn-danger btn-sm" onclick="confirmDeleteArticle(${article.id})">Удалить</button>` : ''}
+          </div>` : ''}
       </div>
     </div>
   `).join('');
@@ -618,44 +410,105 @@ function renderArticles() {
 
 function toggleArticle(id) {
   const card = document.querySelector(`.article-card[data-id="${id}"]`);
-  if (card) {
-    card.classList.toggle('expanded');
-  }
+  if (card) card.classList.toggle('expanded');
+}
+
+function openArticleModal(id) {
+  const article = state.articles.find((item) => item.id === id);
+  if (!article) return;
+
+  openModal(`
+    <div class="article-badges">
+      ${article.vidName ? `<span class="badge badge-vid">${escapeHtml(article.vidName)}</span>` : ''}
+      ${article.rabotaName ? `<span class="badge badge-rabota">${escapeHtml(article.rabotaName)}</span>` : ''}
+    </div>
+    <h2>${escapeHtml(article.title)}</h2>
+    <div class="article-meta">
+      <span>${escapeHtml(article.authorName || 'Неизвестен')}</span>
+      <span>${formatDate(article.publishDate)}</span>
+    </div>
+    <div class="article-text">${escapeHtml(article.content || '')}</div>
+    ${article.file ? `<div class="modal-actions-row"><a class="btn btn-secondary" href="${escapeAttr(article.file)}" target="_blank" rel="noopener">Открыть файл</a></div>` : ''}
+  `);
+}
+
+function openModal(html) {
+  $('modal-body').innerHTML = html;
+  $('article-modal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
+function closeModal() {
+  $('article-modal').classList.add('hidden');
+  $('modal-body').innerHTML = '';
+  document.body.classList.remove('modal-open');
 }
 
 function rabotaOptions(selectedId) {
-  return raboty.map(r => `
-    <option value="${r.id}" ${Number(r.id) === Number(selectedId) ? 'selected' : ''}>
-      ${escapeHtml(r.name)} (${escapeHtml(r.vidName || 'Без вида')})
-    </option>
+  return state.raboty.map((work) => `
+    <option value="${work.id}" ${Number(work.id) === Number(selectedId) ? 'selected' : ''}>${escapeHtml(work.name)} (${escapeHtml(work.vidName || 'без вида')})</option>
   `).join('');
 }
 
 function vidOptions(selectedId) {
-  return vidyRabot.map(v => `
-    <option value="${v.id}" ${Number(v.id) === Number(selectedId) ? 'selected' : ''}>
-      ${escapeHtml(v.name)}
-    </option>
+  return state.vidy.map((vid) => `
+    <option value="${vid.id}" ${Number(vid.id) === Number(selectedId) ? 'selected' : ''}>${escapeHtml(vid.name)}</option>
   `).join('');
 }
 
-async function refreshContent() {
-  await loadVidyRabot();
-  await loadRaboty();
-  await loadArticles();
-  renderVidyRabot();
-  renderRaboty();
+function populateRabotySelect() {
+  const select = $('article-rabota');
+  if (!select) return;
+  select.innerHTML = '<option value="">Выберите работу</option>' + rabotaOptions(null);
+}
+
+async function handleAddArticle(event) {
+  event.preventDefault();
+
+  const title = $('article-title').value.trim();
+  const rabotaId = $('article-rabota').value;
+  const keywords = $('article-keywords').value.trim();
+  const content = $('article-content').value.trim();
+  const file = $('article-pdf').files[0];
+
+  $('article-success').classList.add('hidden');
+  $('article-error').classList.add('hidden');
+
+  if (!title || !rabotaId || !content) {
+    showError($('article-error'), 'Заполните обязательные поля: название, работа, текст статьи');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('title', title);
+  formData.append('rabotaId', rabotaId);
+  formData.append('keywords', keywords);
+  formData.append('content', content);
+  if (file) formData.append('pdfFile', file);
+
+  try {
+    await apiJson(`${API_BASE}/articles`, { method: 'POST', body: formData });
+    $('article-success').textContent = 'Инструкция опубликована';
+    $('article-success').classList.remove('hidden');
+
+    ['article-title', 'article-keywords', 'article-content'].forEach((id) => { $(id).value = ''; });
+    $('article-rabota').value = '';
+    $('article-pdf').value = '';
+    $('char-count').textContent = '0';
+    $('file-upload-text').textContent = 'Выберите PDF-файл или перетащите сюда';
+    document.querySelector('.file-upload-label').classList.remove('has-file');
+    $('clear-pdf').classList.add('hidden');
+
+    await loadArticles();
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    showError($('article-error'), error.message);
+  }
 }
 
 function openEditArticle(id) {
-  const article = articles.find(item => item.id === id);
+  const article = state.articles.find((item) => item.id === id);
   if (!article) return;
-
-  const currentFile = article.file
-    ? `<div class="edit-current-file">Текущий файл:
-         <a href="${escapeAttr(article.file)}" target="_blank" rel="noopener">${escapeHtml(article.file.split('/').pop())}</a>
-       </div>`
-    : '<div class="edit-current-file">Файл не прикреплён</div>';
 
   openModal(`
     <h2>Редактировать инструкцию</h2>
@@ -664,7 +517,6 @@ function openEditArticle(id) {
         <label for="edit-article-title">Название <span class="required">*</span></label>
         <input type="text" id="edit-article-title" value="${escapeAttr(article.title)}" required>
       </div>
-
       <div class="form-row">
         <div class="form-group">
           <label for="edit-article-rabota">Работа <span class="required">*</span></label>
@@ -675,642 +527,168 @@ function openEditArticle(id) {
           <input type="text" id="edit-article-keywords" value="${escapeAttr(article.keywords || '')}">
         </div>
       </div>
-
       <div class="form-group">
         <label for="edit-article-content">Текст инструкции <span class="required">*</span></label>
         <textarea id="edit-article-content" rows="10" required>${escapeHtml(article.content || '')}</textarea>
       </div>
-
       <div class="form-group">
-        <label for="edit-article-file">Заменить PDF (необязательно)</label>
-        <input type="file" id="edit-article-file" accept=".pdf">
-        ${currentFile}
+        <label for="edit-article-file">Заменить файл</label>
+        <input type="file" id="edit-article-file" accept=".pdf,.doc,.docx,.xls,.xlsx">
+        ${article.file ? `<span class="field-hint">Текущий файл: <a href="${escapeAttr(article.file)}" target="_blank" rel="noopener">открыть</a></span>` : ''}
       </div>
-
       <div class="form-actions">
-        <button type="button" class="btn btn-secondary" id="edit-article-cancel">Отмена</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Отмена</button>
         <button type="submit" class="btn btn-primary">Сохранить</button>
       </div>
     </form>
   `);
 
-  document.getElementById('edit-article-cancel').addEventListener('click', closeModal);
-  document.getElementById('edit-article-form').addEventListener('submit', async (event) => {
+  $('edit-article-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-
-    const form = event.currentTarget;
-    const title = document.getElementById('edit-article-title').value.trim();
-    const rabotaId = document.getElementById('edit-article-rabota').value;
-    const keywords = document.getElementById('edit-article-keywords').value.trim();
-    const content = document.getElementById('edit-article-content').value.trim();
-    const file = document.getElementById('edit-article-file').files[0];
-
-    if (!title || !rabotaId || !content) {
-      alert('Заполните название, работу и текст инструкции');
-      return;
-    }
 
     const formData = new FormData();
-    formData.append('title', title);
-    formData.append('rabotaId', rabotaId);
-    formData.append('keywords', keywords);
-    formData.append('content', content);
+    formData.append('title', $('edit-article-title').value.trim());
+    formData.append('rabotaId', $('edit-article-rabota').value);
+    formData.append('keywords', $('edit-article-keywords').value.trim());
+    formData.append('content', $('edit-article-content').value.trim());
+    const file = $('edit-article-file').files[0];
     if (file) formData.append('pdfFile', file);
 
-    const submitBtn = form.querySelector('button[type="submit"]');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Сохранение...';
-
     try {
-      const response = await apiFetch(`${API_BASE}/articles/${article.id}`, {
-        method: 'PUT',
-        body: formData
-      });
-      const data = await response.json();
-
-      if (!data.success) {
-        alert('Ошибка: ' + (data.error || 'Не удалось сохранить статью'));
-        return;
-      }
-
+      await apiJson(`${API_BASE}/articles/${article.id}`, { method: 'PUT', body: formData });
       closeModal();
       await loadArticles();
+      toast('Инструкция сохранена');
     } catch (error) {
-      if (isAuthError(error)) return;
-      alert('Ошибка подключения к серверу');
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Сохранить';
+      if (error instanceof AuthError) return;
+      toast(error.message, 'error');
     }
   });
-}
-
-function openEditRabota(id) {
-  const rabota = raboty.find(item => item.id === id);
-  if (!rabota) return;
-
-  openModal(`
-    <h2>Редактировать работу</h2>
-    <form id="edit-rabota-form" class="modal-form">
-      <div class="form-row">
-        <div class="form-group">
-          <label for="edit-rabota-name">Название <span class="required">*</span></label>
-          <input type="text" id="edit-rabota-name" value="${escapeAttr(rabota.name)}" required>
-        </div>
-        <div class="form-group">
-          <label for="edit-rabota-vid">Вид работ <span class="required">*</span></label>
-          <select id="edit-rabota-vid" required>${vidOptions(rabota.vidId)}</select>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label for="edit-rabota-description">Описание</label>
-        <textarea id="edit-rabota-description" rows="4">${escapeHtml(rabota.description || '')}</textarea>
-      </div>
-
-      <div class="form-group">
-        <label for="edit-rabota-instruction">Инструкция</label>
-        <textarea id="edit-rabota-instruction" rows="8">${escapeHtml(rabota.instruction || '')}</textarea>
-      </div>
-
-      <div class="form-actions">
-        <button type="button" class="btn btn-secondary" id="edit-rabota-cancel">Отмена</button>
-        <button type="submit" class="btn btn-primary">Сохранить</button>
-      </div>
-    </form>
-  `);
-
-  document.getElementById('edit-rabota-cancel').addEventListener('click', closeModal);
-  document.getElementById('edit-rabota-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-
-    const form = event.currentTarget;
-    const name = document.getElementById('edit-rabota-name').value.trim();
-    const vidId = document.getElementById('edit-rabota-vid').value;
-    const description = document.getElementById('edit-rabota-description').value.trim();
-    const instruction = document.getElementById('edit-rabota-instruction').value.trim();
-
-    if (!name || !vidId) {
-      alert('Заполните название и выберите вид работ');
-      return;
-    }
-
-    const submitBtn = form.querySelector('button[type="submit"]');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Сохранение...';
-
-    try {
-      const response = await apiFetch(`${API_BASE}/raboty/${rabota.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          vidId: parseInt(vidId, 10),
-          description: description || null,
-          instruction: instruction || null
-        })
-      });
-      const data = await response.json();
-
-      if (!data.success) {
-        alert('Ошибка: ' + (data.error || 'Не удалось сохранить работу'));
-        return;
-      }
-
-      closeModal();
-      await refreshContent();
-    } catch (error) {
-      if (isAuthError(error)) return;
-      alert('Ошибка подключения к серверу');
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Сохранить';
-    }
-  });
-}
-
-function openEditVid(id) {
-  const vid = vidyRabot.find(item => item.id === id);
-  if (!vid) return;
-
-  openModal(`
-    <h2>Редактировать вид работ</h2>
-    <form id="edit-vid-form" class="modal-form">
-      <div class="form-group">
-        <label for="edit-vid-name">Название <span class="required">*</span></label>
-        <input type="text" id="edit-vid-name" value="${escapeAttr(vid.name)}" required>
-      </div>
-
-      <div class="form-actions">
-        <button type="button" class="btn btn-secondary" id="edit-vid-cancel">Отмена</button>
-        <button type="submit" class="btn btn-primary">Сохранить</button>
-      </div>
-    </form>
-  `);
-
-  document.getElementById('edit-vid-cancel').addEventListener('click', closeModal);
-  document.getElementById('edit-vid-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-
-    const form = event.currentTarget;
-    const name = document.getElementById('edit-vid-name').value.trim();
-
-    if (!name) {
-      alert('Введите название вида работ');
-      return;
-    }
-
-    const submitBtn = form.querySelector('button[type="submit"]');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Сохранение...';
-
-    try {
-      const response = await apiFetch(`${API_BASE}/vidy-rabot/${vid.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
-      const data = await response.json();
-
-      if (!data.success) {
-        alert('Ошибка: ' + (data.error || 'Не удалось сохранить вид работ'));
-        return;
-      }
-
-      closeModal();
-      await refreshContent();
-      populateFilterRabotyVid();
-    } catch (error) {
-      if (isAuthError(error)) return;
-      alert('Ошибка подключения к серверу');
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Сохранить';
-    }
-  });
-}
-
-function openArticleModal(id) {
-  const article = articles.find(a => a.id === id);
-  if (!article) return;
-  
-  modalBody.innerHTML = `
-    <div class="article-badges">
-      ${article.vidName ? `<span class="badge badge-vid">${escapeHtml(article.vidName)}</span>` : ''}
-      ${article.rabotaName ? `<span class="badge badge-rabota">${escapeHtml(article.rabotaName)}</span>` : ''}
-    </div>
-    <h2>${escapeHtml(article.title)}</h2>
-    <div class="article-meta">
-      <span>${escapeHtml(article.authorName || 'Неизвестен')}</span>
-      <span>${article.publishDate || 'Без даты'}</span>
-    </div>
-    <div class="article-text">${escapeHtml(article.content || '')}</div>
-    ${article.keywords ? `
-      <div class="article-keywords">
-        ${article.keywords.split(',').map(kw => `<span>${escapeHtml(kw.trim())}</span>`).join('')}
-      </div>
-    ` : ''}
-  `;
-  
-  modal.classList.remove('hidden');
 }
 
 async function confirmDeleteArticle(id) {
-  if (!confirm('Вы уверены, что хотите удалить эту статью?')) return;
-  
+  if (!confirm('Удалить инструкцию? Действие необратимо.')) return;
+
   try {
-    const response = await apiFetch(`${API_BASE}/articles/${id}`, { method: 'DELETE' });
-    const data = await response.json();
-    
-    if (data.success) {
-      await loadArticles();
-    } else {
-      alert('Ошибка удаления: ' + (data.error || 'Неизвестная ошибка'));
-    }
+    await apiJson(`${API_BASE}/articles/${id}`, { method: 'DELETE' });
+    await loadArticles();
+    toast('Инструкция удалена');
   } catch (error) {
-    if (isAuthError(error)) return;
-    alert('Ошибка подключения к серверу');
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
   }
 }
 
-function populateRabotySelect() {
-  const select = document.getElementById('article-rabota');
-  select.innerHTML = '<option value="">Выберите работу</option>';
-  raboty.forEach(r => {
-    select.innerHTML += `<option value="${r.id}">${escapeHtml(r.name)} (${escapeHtml(r.vidName || 'Без вида')})</option>`;
-  });
-}
-
-async function handleAddArticle(e) {
-  e.preventDefault();
-  
-  const title = document.getElementById('article-title').value.trim();
-  const rabotaId = document.getElementById('article-rabota').value;
-  const keywords = document.getElementById('article-keywords').value.trim();
-  const content = document.getElementById('article-content').value.trim();
-  const pdfFile = document.getElementById('article-pdf').files[0];
-  
-  const successEl = document.getElementById('article-success');
-  const errorEl = document.getElementById('article-error');
-  
-  successEl.classList.add('hidden');
-  errorEl.classList.add('hidden');
-  
-  if (!title || !rabotaId || !content) {
-    showError(errorEl, 'Заполните обязательные поля: название, работа, текст статьи');
-    return;
-  }
-  
-  try {
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('rabotaId', rabotaId);
-    formData.append('keywords', keywords || '');
-    formData.append('content', content);
-    
-    if (pdfFile) {
-      formData.append('pdfFile', pdfFile);
-    }
-    
-    const response = await apiFetch(`${API_BASE}/articles`, {
-      method: 'POST',
-      body: formData
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      successEl.textContent = 'Инструкция успешно опубликована!';
-      successEl.classList.remove('hidden');
-      
-      document.getElementById('article-title').value = '';
-      document.getElementById('article-rabota').value = '';
-      document.getElementById('article-keywords').value = '';
-      document.getElementById('article-content').value = '';
-      document.getElementById('article-pdf').value = '';
-      document.getElementById('char-count').textContent = '0';
-      
-      document.getElementById('file-upload-text').textContent = 'Выберите PDF-файл или перетащите сюда';
-      document.querySelector('.file-upload-label').classList.remove('has-file');
-      document.getElementById('clear-pdf').classList.add('hidden');
-      
-      await loadArticles();
-    } else {
-      showError(errorEl, data.error || 'Ошибка добавления инструкции');
-    }
-  } catch (error) {
-    if (isAuthError(error)) return;
-    showError(errorEl, 'Ошибка подключения к серверу');
-  }
-}
-
-
-function renderUsers() {
-  const container = document.getElementById('users-list');
-  
-  container.innerHTML = users.map(user => `
-    <tr class="${user.id === currentUser.id ? 'current-user' : ''}">
-      <td class="user-id">#${user.id}</td>
-      <td>
-        <div class="user-cell">
-          <div class="user-avatar">${user.fullName.charAt(0)}</div>
-          <div>
-            <div class="user-cell-name">${escapeHtml(user.fullName)}</div>
-            ${user.id === currentUser.id ? '<div class="user-cell-you">(Вы)</div>' : ''}
-          </div>
-        </div>
-      </td>
-      <td class="user-tabnumber">${escapeHtml(user.tabNumber)}</td>
-      <td>
-        <span id="role-display-${user.id}">
-          <span class="role-badge ${getRoleClass(user.role)}">
-            ${getRoleIcon(user.role)} ${user.role}
-          </span>
-        </span>
-        <span id="role-edit-${user.id}" class="hidden">
-          <select class="role-select" id="role-select-${user.id}">
-            <option value="Монтажник" ${user.role === 'Монтажник' ? 'selected' : ''}>Монтажник</option>
-            <option value="Старший монтажник" ${user.role === 'Старший монтажник' ? 'selected' : ''}>Старший монтажник</option>
-            <option value="Инженер ПТО" ${user.role === 'Инженер ПТО' ? 'selected' : ''}>Инженер ПТО</option>
-            <option value="Администратор" ${user.role === 'Администратор' ? 'selected' : ''}>Администратор</option>
-          </select>
-          <div class="confirm-btns">
-            <button class="btn btn-primary btn-sm" onclick="saveRole(${user.id})">✓</button>
-            <button class="btn btn-secondary btn-sm" onclick="cancelEditRole(${user.id})">✗</button>
-          </div>
-        </span>
-      </td>
-      <td>
-        <div class="actions-cell">
-          ${user.id !== currentUser.id ? `
-            <button class="action-btn edit" onclick="editRole(${user.id})" title="Изменить должность">Изменить</button>
-            <button class="action-btn delete" onclick="confirmDeleteUser(${user.id})" title="Удалить">Удалить</button>
-          ` : ''}
-        </div>
-      </td>
-    </tr>
-  `).join('');
-}
-
-function editRole(id) {
-  document.getElementById(`role-display-${id}`).classList.add('hidden');
-  document.getElementById(`role-edit-${id}`).classList.remove('hidden');
-}
-
-function cancelEditRole(id) {
-  document.getElementById(`role-display-${id}`).classList.remove('hidden');
-  document.getElementById(`role-edit-${id}`).classList.add('hidden');
-}
-
-async function saveRole(id) {
-  const newRole = document.getElementById(`role-select-${id}`).value;
-  
-  try {
-    const response = await apiFetch(`${API_BASE}/sotrudniki/${id}/role`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: newRole })
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      await loadUsers();
-    } else {
-      alert('Ошибка: ' + (data.error || 'Не удалось изменить должность'));
-    }
-  } catch (error) {
-    if (isAuthError(error)) return;
-    alert('Ошибка подключения к серверу');
-  }
-}
-
-async function confirmDeleteUser(id) {
-  if (!confirm('Вы уверены, что хотите удалить этого сотрудника?')) return;
-  
-  try {
-    const response = await apiFetch(`${API_BASE}/sotrudniki/${id}`, { method: 'DELETE' });
-    const data = await response.json();
-    
-    if (data.success) {
-      await loadUsers();
-    } else {
-      alert('Ошибка: ' + (data.error || 'Не удалось удалить сотрудника'));
-    }
-  } catch (error) {
-    if (isAuthError(error)) return;
-    alert('Ошибка подключения к серверу');
-  }
-}
-
-async function handleAddUser(e) {
-  e.preventDefault();
-  
-  const fullName = document.getElementById('new-fullname').value.trim();
-  const tabNumber = document.getElementById('new-tabnumber').value.trim();
-  const password = document.getElementById('new-password').value.trim();
-  const role = document.getElementById('new-role').value;
-  
-  const errorEl = document.getElementById('user-form-error');
-  const successEl = document.getElementById('user-form-success');
-  
-  errorEl.classList.add('hidden');
-  successEl.classList.add('hidden');
-  
-  if (!fullName || !tabNumber || !password) {
-    showError(errorEl, 'Заполните все поля');
-    return;
-  }
-  
-  try {
-    const response = await apiFetch(`${API_BASE}/sotrudniki`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tabNumber, password, fullName, role })
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      successEl.textContent = 'Сотрудник успешно добавлен!';
-      successEl.classList.remove('hidden');
-      
-      document.getElementById('new-fullname').value = '';
-      document.getElementById('new-tabnumber').value = '';
-      document.getElementById('new-password').value = '';
-      document.getElementById('new-role').value = 'Монтажник';
-      
-      await loadUsers();
-    } else {
-      showError(errorEl, data.error || 'Ошибка добавления сотрудника');
-    }
-  } catch (error) {
-    if (isAuthError(error)) return;
-    showError(errorEl, 'Ошибка подключения к серверу');
-  }
-}
-
+// --- Справочники: виды работ и работы ---
 
 function renderVidyRabot() {
-  const container = document.getElementById('vidy-rabot-list');
-  const emptyState = document.getElementById('vidy-rabot-empty');
-  
-  if (vidyRabot.length === 0) {
+  const container = $('vidy-rabot-list');
+  const empty = $('vidy-rabot-empty');
+  if (!container) return;
+
+  if (!state.vidy.length) {
     container.innerHTML = '';
-    emptyState.classList.remove('hidden');
+    empty.classList.remove('hidden');
     return;
   }
-  
-  emptyState.classList.add('hidden');
 
-  const countByVid = {};
-  raboty.forEach(r => {
-    countByVid[r.vidId] = (countByVid[r.vidId] || 0) + 1;
-  });
-  
-  container.innerHTML = vidyRabot.map(vid => `
+  empty.classList.add('hidden');
+  container.innerHTML = state.vidy.map((vid) => `
     <tr>
       <td class="user-id">#${vid.id}</td>
-      <td>
-        <span class="badge badge-vid" style="font-size: 14px;">${escapeHtml(vid.name)}</span>
-      </td>
-      <td>
-        <div class="actions-cell">
-          <button class="action-btn edit" onclick="openEditVid(${vid.id})" title="Редактировать">✏️</button>
-          <button class="action-btn delete" onclick="confirmDeleteVid(${vid.id})" title="Удалить">🗑️</button>
-        </div>
-      </td>
+      <td>${escapeHtml(vid.name)}</td>
+      <td><button class="action-btn delete" onclick="deleteVid(${vid.id})" title="Удалить">Удалить</button></td>
     </tr>
   `).join('');
 }
 
-async function handleAddVidRabot(e) {
-  e.preventDefault();
-  
-  const name = document.getElementById('new-vid-name').value.trim();
-  const errorEl = document.getElementById('vid-form-error');
-  const successEl = document.getElementById('vid-form-success');
-  
+async function handleAddVidRabot(event) {
+  event.preventDefault();
+  const errorEl = $('vid-form-error');
+  const successEl = $('vid-form-success');
   errorEl.classList.add('hidden');
   successEl.classList.add('hidden');
-  
-  if (!name) {
-    showError(errorEl, 'Введите название вида работ');
-    return;
-  }
-  
+
   try {
-    const response = await apiFetch(`${API_BASE}/vidy-rabot`, {
+    await apiJson(`${API_BASE}/vidy-rabot`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ name: $('new-vid-name').value.trim() })
     });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      successEl.textContent = 'Вид работ успешно добавлен!';
-      successEl.classList.remove('hidden');
-      document.getElementById('new-vid-name').value = '';
-      
-      await loadVidyRabot();
-      renderVidyRabot();
-    } else {
-      showError(errorEl, data.error || 'Ошибка добавления');
-    }
+
+    $('new-vid-name').value = '';
+    successEl.textContent = 'Вид работ добавлен';
+    successEl.classList.remove('hidden');
+    await loadVidyRabot();
+    renderVidyRabot();
   } catch (error) {
-    if (isAuthError(error)) return;
-    showError(errorEl, 'Ошибка подключения к серверу');
+    if (error instanceof AuthError) return;
+    showError(errorEl, error.message);
   }
 }
 
-async function confirmDeleteVid(id) {
-  const hasRaboty = raboty.some(r => r.vidId === id);
-  if (hasRaboty) {
-    alert('Невозможно удалить вид работ: есть связанные работы.\nСначала удалите все работы этого вида.');
-    return;
-  }
-  
-  if (!confirm('Удалить этот вид работ?')) return;
-  
+async function deleteVid(id) {
+  if (!confirm('Удалить вид работ?')) return;
   try {
-    const response = await apiFetch(`${API_BASE}/vidy-rabot/${id}`, { method: 'DELETE' });
-    const data = await response.json();
-    
-    if (data.success) {
-      await loadVidyRabot();
-      renderVidyRabot();
-    } else {
-      alert('Ошибка: ' + (data.error || 'Не удалось удалить'));
-    }
+    await apiJson(`${API_BASE}/vidy-rabot/${id}`, { method: 'DELETE' });
+    await loadVidyRabot();
+    renderVidyRabot();
   } catch (error) {
-    if (isAuthError(error)) return;
-    alert('Ошибка подключения к серверу');
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
   }
-}
-
-function populateFilterRabotyVid() {
-  const select = document.getElementById('filter-raboty-vid');
-  select.innerHTML = '<option value="all">Все виды работ</option>';
-  vidyRabot.forEach(vid => {
-    select.innerHTML += `<option value="${vid.id}">${escapeHtml(vid.name)}</option>`;
-  });
 }
 
 function populateVidSelectForRabota() {
-  const select = document.getElementById('new-rabota-vid');
-  select.innerHTML = '<option value="">Выберите вид работ</option>';
-  vidyRabot.forEach(vid => {
-    select.innerHTML += `<option value="${vid.id}">${escapeHtml(vid.name)}</option>`;
-  });
+  const select = $('new-rabota-vid');
+  if (!select) return;
+  select.innerHTML = '<option value="">Выберите вид работ</option>' + vidOptions(null);
+}
+
+function populateFilterRabotyVid() {
+  const select = $('filter-raboty-vid');
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="all">Все виды работ</option>' + state.vidy.map((vid) => `<option value="${vid.id}">${escapeHtml(vid.name)}</option>`).join('');
+  select.value = current || 'all';
 }
 
 function renderRaboty() {
-  const container = document.getElementById('raboty-list');
-  const emptyState = document.getElementById('raboty-empty');
+  const container = $('raboty-list');
+  const empty = $('raboty-empty');
+  if (!container) return;
 
-  let filtered = raboty.filter(r => {
-    const matchesVid = filterRabotyVid === 'all' || r.vidId == filterRabotyVid;
-    const matchesSearch = r.name.toLowerCase().includes(searchRaboty) ||
-                          (r.description && r.description.toLowerCase().includes(searchRaboty)) ||
-                          (r.instruction && r.instruction.toLowerCase().includes(searchRaboty));
-    return matchesVid && matchesSearch;
+  const search = ($('search-raboty')?.value || '').toLowerCase();
+  const filterVid = $('filter-raboty-vid')?.value || 'all';
+
+  const filtered = state.raboty.filter((work) => {
+    const matchesSearch = !search || (work.name || '').toLowerCase().includes(search);
+    const matchesVid = filterVid === 'all' || String(work.vidId) === String(filterVid);
+    return matchesSearch && matchesVid;
   });
-  
-  if (filtered.length === 0) {
+
+  if (!filtered.length) {
     container.innerHTML = '';
-    emptyState.classList.remove('hidden');
+    empty.classList.remove('hidden');
     return;
   }
-  
-  emptyState.classList.add('hidden');
-  
-  container.innerHTML = filtered.map(r => `
-    <div class="rabota-card" data-id="${r.id}">
-      <div class="rabota-header" onclick="toggleRabota(${r.id})">
-        <div class="rabota-header-content">
-          <h3 class="rabota-title">${escapeHtml(r.name)}</h3>
-          <span class="rabota-vid">${escapeHtml(r.vidName || 'Без вида')}</span>
+
+  empty.classList.add('hidden');
+  container.innerHTML = filtered.map((work) => `
+    <div class="rabota-card" data-id="${work.id}">
+      <div class="rabota-header" onclick="toggleRabota(${work.id})">
+        <div>
+          <span class="badge badge-vid">${escapeHtml(work.vidName || 'Без вида')}</span>
+          <h3>${escapeHtml(work.name)}</h3>
         </div>
-        <span class="rabota-expand-icon">▼</span>
+        <span class="article-expand-icon">▼</span>
       </div>
       <div class="rabota-content">
-        ${r.description ? `
-          <div class="rabota-section">
-            <h4>Описание</h4>
-            <p>${escapeHtml(r.description)}</p>
-          </div>
-        ` : ''}
-        ${r.instruction ? `
-          <div class="rabota-section">
-            <h4>Инструкция</h4>
-            <p>${escapeHtml(r.instruction)}</p>
-          </div>
-        ` : ''}
-        ${!r.description && !r.instruction ? '<p style="color:#64748b;padding-top:16px;">Описание и инструкция не заполнены</p>' : ''}
-        <div class="rabota-actions">
-          <button class="btn btn-secondary btn-sm" onclick="openEditRabota(${r.id})">✏️ Редактировать</button>
-          <button class="btn btn-danger btn-sm" onclick="confirmDeleteRabota(${r.id})">Удалить</button>
+        ${work.description ? `<p>${escapeHtml(work.description)}</p>` : ''}
+        ${work.instruction ? `<div class="article-text">${escapeHtml(work.instruction)}</div>` : ''}
+        <div class="article-actions">
+          <button class="btn btn-secondary btn-sm" onclick="openEditRabota(${work.id})">✏️ Редактировать</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteRabota(${work.id})">Удалить</button>
         </div>
       </div>
     </div>
@@ -1322,250 +700,416 @@ function toggleRabota(id) {
   if (card) card.classList.toggle('expanded');
 }
 
-async function handleAddRabota(e) {
-  e.preventDefault();
-  
-  const name = document.getElementById('new-rabota-name').value.trim();
-  const vidId = document.getElementById('new-rabota-vid').value;
-  const description = document.getElementById('new-rabota-description').value.trim();
-  const instruction = document.getElementById('new-rabota-instruction').value.trim();
-  
-  const errorEl = document.getElementById('rabota-form-error');
-  const successEl = document.getElementById('rabota-form-success');
-  
+async function handleAddRabota(event) {
+  event.preventDefault();
+  const errorEl = $('rabota-form-error');
+  const successEl = $('rabota-form-success');
   errorEl.classList.add('hidden');
   successEl.classList.add('hidden');
-  
-  if (!name || !vidId) {
-    showError(errorEl, 'Заполните название и выберите вид работ');
+
+  const payload = {
+    name: $('new-rabota-name').value.trim(),
+    vidId: $('new-rabota-vid').value,
+    description: $('new-rabota-description').value.trim(),
+    instruction: $('new-rabota-instruction').value.trim()
+  };
+
+  if (!payload.name || !payload.vidId) {
+    showError(errorEl, 'Заполните название и вид работ');
     return;
   }
-  
+
   try {
-    const response = await apiFetch(`${API_BASE}/raboty`, {
+    await apiJson(`${API_BASE}/raboty`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        vidId: parseInt(vidId),
-        description: description || null,
-        instruction: instruction || null
-      })
+      body: JSON.stringify(payload)
     });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      successEl.textContent = 'Работа успешно добавлена!';
-      successEl.classList.remove('hidden');
-      
-      document.getElementById('new-rabota-name').value = '';
-      document.getElementById('new-rabota-vid').value = '';
-      document.getElementById('new-rabota-description').value = '';
-      document.getElementById('new-rabota-instruction').value = '';
-      
-      await loadRaboty();
-      renderRaboty();
 
-      populateRabotySelect();
-    } else {
-      showError(errorEl, data.error || 'Ошибка добавления');
-    }
+    ['new-rabota-name', 'new-rabota-description', 'new-rabota-instruction'].forEach((id) => { $(id).value = ''; });
+    $('new-rabota-vid').value = '';
+    successEl.textContent = 'Работа добавлена';
+    successEl.classList.remove('hidden');
+
+    await loadRaboty();
+    renderRaboty();
+    populateRabotySelect();
   } catch (error) {
-    if (isAuthError(error)) return;
-    showError(errorEl, 'Ошибка подключения к серверу');
+    if (error instanceof AuthError) return;
+    showError(errorEl, error.message);
   }
 }
 
-async function confirmDeleteRabota(id) {
-  const hasArticles = articles.some(a => a.rabotaId === id);
-  if (hasArticles) {
-    alert('Невозможно удалить работу: есть связанные статьи.\nСначала удалите все статьи по этой работе.');
-    return;
-  }
-  
-  if (!confirm('Удалить эту работу?')) return;
-  
+function openEditRabota(id) {
+  const work = state.raboty.find((item) => item.id === id);
+  if (!work) return;
+
+  openModal(`
+    <h2>Редактировать работу</h2>
+    <form id="edit-rabota-form" class="modal-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edit-rabota-name">Название <span class="required">*</span></label>
+          <input type="text" id="edit-rabota-name" value="${escapeAttr(work.name)}" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-rabota-vid">Вид работ <span class="required">*</span></label>
+          <select id="edit-rabota-vid" required>${vidOptions(work.vidId)}</select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="edit-rabota-description">Описание</label>
+        <textarea id="edit-rabota-description" rows="3">${escapeHtml(work.description || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label for="edit-rabota-instruction">Инструкция</label>
+        <textarea id="edit-rabota-instruction" rows="8">${escapeHtml(work.instruction || '')}</textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+      </div>
+    </form>
+  `);
+
+  $('edit-rabota-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    try {
+      await apiJson(`${API_BASE}/raboty/${work.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: $('edit-rabota-name').value.trim(),
+          vidId: $('edit-rabota-vid').value,
+          description: $('edit-rabota-description').value.trim(),
+          instruction: $('edit-rabota-instruction').value.trim()
+        })
+      });
+
+      closeModal();
+      await loadRaboty();
+      renderRaboty();
+      toast('Работа сохранена');
+    } catch (error) {
+      if (error instanceof AuthError) return;
+      toast(error.message, 'error');
+    }
+  });
+}
+
+async function deleteRabota(id) {
+  if (!confirm('Удалить работу? Если к ней привязаны статьи, удаление будет отклонено.')) return;
   try {
-    const response = await apiFetch(`${API_BASE}/raboty/${id}`, { method: 'DELETE' });
-    const data = await response.json();
-    
-    if (data.success) {
-      await loadRaboty();
-      renderRaboty();
-      populateRabotySelect();
-    } else {
-      alert('Ошибка: ' + (data.error || 'Не удалось удалить'));
-    }
+    await apiJson(`${API_BASE}/raboty/${id}`, { method: 'DELETE' });
+    await loadRaboty();
+    renderRaboty();
   } catch (error) {
-    if (isAuthError(error)) return;
-    alert('Ошибка подключения к серверу');
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
   }
 }
 
-// === МОДУЛЬ ПТО ==========================================================
+// --- Сотрудники ---
 
-function canManagePto() {
-  return Boolean(currentUser) &&
-    (currentUser.role === 'Администратор' || currentUser.role === 'Инженер ПТО');
+async function loadUsers() {
+  const data = await apiJsonSafe(`${API_BASE}/sotrudniki`);
+  state.users = data ? data.data : [];
+  renderUsers();
 }
 
-function applyPtoPermissions() {
-  const allowed = canManagePto();
+function renderUsers() {
+  const container = $('users-list');
+  if (!container) return;
 
-  document.getElementById('show-add-doc').classList.toggle('hidden', !allowed);
-  document.getElementById('show-add-object').classList.toggle('hidden', !allowed);
+  container.innerHTML = (state.users || []).map((user) => `
+    <tr class="${state.user && user.id === state.user.id ? 'current-user' : ''}">
+      <td class="user-id">#${user.id}</td>
+      <td>
+        <div class="user-cell">
+          <div class="user-avatar">${escapeHtml((user.fullName || '?').charAt(0))}</div>
+          <div>
+            <div class="user-cell-name">${escapeHtml(user.fullName)}</div>
+            ${state.user && user.id === state.user.id ? '<div class="user-cell-you">(Вы)</div>' : ''}
+            ${user.blocked ? '<div class="user-cell-you">заблокирован</div>' : ''}
+          </div>
+        </div>
+      </td>
+      <td class="user-tabnumber">${escapeHtml(user.tabNumber)}</td>
+      <td>
+        <select class="role-select" onchange="changeRole(${user.id}, this.value)">
+          ${ROLES.map((role) => `<option value="${escapeAttr(role)}" ${user.role === role ? 'selected' : ''}>${escapeHtml(role)}</option>`).join('')}
+        </select>
+      </td>
+      <td class="user-access">${(user.objectIds || []).length ? `${user.objectIds.length} объектов` : 'нет доступа'}</td>
+      <td>
+        <div class="actions-cell">
+          <button class="action-btn edit" onclick="openAccessModal(${user.id})" title="Доступ к объектам">Объекты</button>
+          <button class="action-btn edit" onclick="resetUserPassword(${user.id})" title="Сбросить пароль">Пароль</button>
+          ${state.user && user.id !== state.user.id ? `
+            <button class="action-btn" onclick="toggleBlock(${user.id}, ${user.blocked ? 0 : 1})">${user.blocked ? 'Разблокировать' : 'Блокировать'}</button>
+            <button class="action-btn delete" onclick="deleteUser(${user.id})">Удалить</button>` : ''}
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
 
-  if (!allowed) {
-    document.getElementById('add-object-form').classList.add('hidden');
+async function handleAddUser(event) {
+  event.preventDefault();
+  const errorEl = $('user-form-error');
+  const successEl = $('user-form-success');
+  errorEl.classList.add('hidden');
+  successEl.classList.add('hidden');
+
+  const payload = {
+    fullName: $('new-fullname').value.trim(),
+    tabNumber: $('new-tabnumber').value.trim(),
+    password: $('new-password').value,
+    role: $('new-role').value
+  };
+
+  try {
+    await apiJson(`${API_BASE}/sotrudniki`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    ['new-fullname', 'new-tabnumber', 'new-password'].forEach((id) => { $(id).value = ''; });
+    $('new-role').value = 'Монтажник';
+    successEl.textContent = 'Сотрудник добавлен';
+    successEl.classList.remove('hidden');
+    await loadUsers();
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    showError(errorEl, error.message);
   }
 }
 
-function ptoStatusClass(status) {
-  switch (status) {
-    case 'Черновик': return 'draft';
-    case 'На проверке': return 'check';
-    case 'На согласовании': return 'review';
-    case 'Утверждён': return 'approved';
-    case 'Отклонён': return 'rejected';
-    case 'В архиве': return 'archived';
-    default: return 'draft';
+async function changeRole(id, role) {
+  try {
+    await apiJson(`${API_BASE}/sotrudniki/${id}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role })
+    });
+    await loadUsers();
+    toast('Должность изменена');
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+    await loadUsers();
   }
 }
 
-function todayIso() {
-  const now = new Date();
-  return [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0')
-  ].join('-');
+async function toggleBlock(id, blocked) {
+  if (!confirm(blocked ? 'Заблокировать сотрудника?' : 'Разблокировать сотрудника?')) return;
+  try {
+    await apiJson(`${API_BASE}/sotrudniki/${id}/block`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ blocked: Boolean(blocked) })
+    });
+    await loadUsers();
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+  }
 }
 
-function isPtoOverdue(doc) {
-  if (!doc.dueDate) return false;
-  if (doc.status === 'Утверждён' || doc.status === 'В архиве') return false;
-
-  return String(doc.dueDate).slice(0, 10) < todayIso();
+async function deleteUser(id) {
+  if (!confirm('Удалить сотрудника? Если он автор статей, удаление будет отклонено.')) return;
+  try {
+    await apiJson(`${API_BASE}/sotrudniki/${id}`, { method: 'DELETE' });
+    await loadUsers();
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+  }
 }
 
-function formatDateTime(value) {
-  if (!value) return '—';
+async function resetUserPassword(id) {
+  const value = prompt('Новый пароль (не короче 10 символов, буквы и цифры):');
+  if (!value) return;
 
-  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
-  return match ? `${match[3]}.${match[2]}.${match[1]} ${match[4]}:${match[5]}` : formatDate(value);
+  try {
+    await apiJson(`${API_BASE}/sotrudniki/${id}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: value })
+    });
+    toast('Пароль сброшен');
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+  }
+}
+
+async function openAccessModal(id) {
+  const user = (state.users || []).find((item) => item.id === id);
+  if (!user) return;
+
+  const objectsData = await apiJsonSafe(`${API_BASE}/objects`);
+  const objects = objectsData ? objectsData.data : [];
+  const selected = new Set(user.objectIds || []);
+
+  openModal(`
+    <h2>Доступ к объектам: ${escapeHtml(user.fullName)}</h2>
+    <p class="field-hint">Инженер ПТО видит документы только назначенных объектов. Администратор видит все объекты.</p>
+    <div class="form-group">
+      ${objects.length ? objects.map((object) => `
+        <label class="pto-checkbox" style="color:#E2E8F0">
+          <input type="checkbox" class="access-object" value="${object.id}" ${selected.has(object.id) ? 'checked' : ''}>
+          <span>${escapeHtml(object.name)}</span>
+        </label>
+      `).join('') : '<p class="card-hint">Объекты ещё не созданы</p>'}
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+      <button type="button" class="btn btn-primary" id="save-access">Сохранить</button>
+    </div>
+  `);
+
+  $('save-access').addEventListener('click', async () => {
+    const objectIds = Array.from(document.querySelectorAll('.access-object:checked')).map((input) => Number(input.value));
+    try {
+      await apiJson(`${API_BASE}/sotrudniki/${user.id}/access`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objectIds })
+      });
+      closeModal();
+      await loadUsers();
+      toast('Доступ обновлён');
+    } catch (error) {
+      if (error instanceof AuthError) return;
+      toast(error.message, 'error');
+    }
+  });
+}
+
+// --- Документы ПТО ---
+
+async function loadPtoMeta() {
+  const data = await apiJsonSafe(`${API_BASE}/pto/meta`);
+  if (!data) return;
+
+  state.ptoMeta = data;
+
+  const typeSelect = $('pto-filter-type');
+  if (typeSelect) {
+    typeSelect.innerHTML = '<option value="all">Все типы документов</option>' +
+      data.types.map((type) => `<option value="${escapeAttr(type)}">${escapeHtml(type)}</option>`).join('');
+    typeSelect.value = state.ptoFilters.type;
+  }
+
+  const statusSelect = $('pto-filter-status');
+  if (statusSelect) {
+    statusSelect.innerHTML = '<option value="all">Все статусы</option>' +
+      data.statuses.map((status) => `<option value="${escapeAttr(status)}">${escapeHtml(status)}</option>`).join('');
+    statusSelect.value = state.ptoFilters.status;
+  }
 }
 
 async function loadPtoObjects() {
-  try {
-    const response = await apiFetch(`${API_BASE}/objects`);
-    const data = await response.json();
-    ptoObjects = data.data || [];
-  } catch (error) {
-    if (isAuthError(error)) return;
-    console.error('Ошибка загрузки объектов:', error);
-    ptoObjects = [];
+  const data = await apiJsonSafe(`${API_BASE}/objects`);
+  state.objects = data ? data.data : [];
+
+  const objectSelect = $('pto-filter-object');
+  if (objectSelect) {
+    objectSelect.innerHTML = '<option value="all">Все объекты</option>' +
+      state.objects.map((object) => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('');
+    objectSelect.value = state.ptoFilters.objectId;
   }
 
-  renderPtoFilterOptions();
-  renderObjects();
+  renderObjectSelects();
+  await loadPtoDocuments();
+}
+
+function renderObjectSelects() {
+  const targets = [
+    { id: 'dashboard-object', allLabel: 'Все объекты' },
+    { id: 'report-object', allLabel: 'Все объекты' },
+    { id: 'remarks-filter-object', allLabel: 'Все объекты' }
+  ];
+
+  for (const target of targets) {
+    const select = $(target.id);
+    if (!select) continue;
+    const current = select.value || 'all';
+    select.innerHTML = `<option value="all">${target.allLabel}</option>` +
+      state.objects.map((object) => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('');
+    select.value = current;
+  }
 }
 
 async function loadPtoDocuments() {
   const params = new URLSearchParams();
+  const filters = state.ptoFilters;
 
-  if (ptoFilterType !== 'all') params.set('type', ptoFilterType);
-  if (ptoFilterObject !== 'all') params.set('objectId', ptoFilterObject);
-  if (ptoFilterStatus !== 'all') params.set('status', ptoFilterStatus);
-  if (ptoSearch) params.set('q', ptoSearch);
-  if (ptoOnlyOverdue) params.set('overdue', '1');
+  if (filters.type !== 'all') params.set('type', filters.type);
+  if (filters.objectId !== 'all') params.set('objectId', filters.objectId);
+  if (filters.status !== 'all') params.set('status', filters.status);
+  if (filters.q) params.set('q', filters.q);
+  if (filters.overdue) params.set('overdue', '1');
 
-  // Номер запроса отсекает устаревшие ответы, если фильтры меняли быстро.
-  const requestId = ++ptoLoadRequestId;
+  const requestId = ++state.ptoLoadId;
+  const data = await apiJsonSafe(`${API_BASE}/pto?${params.toString()}`, {});
+  if (requestId !== state.ptoLoadId) return;
 
-  try {
-    const response = await apiFetch(`${API_BASE}/pto?${params.toString()}`);
-    const data = await response.json();
-
-    if (requestId !== ptoLoadRequestId) return;
-
-    ptoDocuments = data.data || [];
-  } catch (error) {
-    if (isAuthError(error)) return;
-    if (requestId !== ptoLoadRequestId) return;
-    console.error('Ошибка загрузки документов ПТО:', error);
-    ptoDocuments = [];
-  }
-
+  state.ptoDocs = data ? data.data : [];
   renderPtoStats();
   renderPtoTable();
 }
 
-function renderPtoFilterOptions() {
-  const typeSelect = document.getElementById('pto-filter-type');
-  typeSelect.innerHTML = '<option value="all">Все типы документов</option>' +
-    PTO_TYPES.map(type => `<option value="${escapeAttr(type)}">${escapeHtml(type)}</option>`).join('');
-  typeSelect.value = ptoFilterType;
-
-  const objectSelect = document.getElementById('pto-filter-object');
-  objectSelect.innerHTML = '<option value="all">Все объекты</option>' +
-    ptoObjects.map(object => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('');
-  objectSelect.value = ptoFilterObject;
-
-  const statusSelect = document.getElementById('pto-filter-status');
-  statusSelect.innerHTML = '<option value="all">Все статусы</option>' +
-    PTO_STATUSES.map(status => `<option value="${escapeAttr(status)}">${escapeHtml(status)}</option>`).join('');
-  statusSelect.value = ptoFilterStatus;
+function isPtoOverdue(doc) {
+  if (!doc.dueDate) return false;
+  if (['Утверждён', 'В архиве'].includes(doc.status)) return false;
+  return String(doc.dueDate).slice(0, 10) < todayIso();
 }
 
 function renderPtoStats() {
-  const container = document.getElementById('pto-stats');
+  const container = $('pto-stats');
   if (!container) return;
 
-  const total = ptoDocuments.length;
-  const inWork = ptoDocuments.filter(doc =>
-    doc.status === 'На проверке' || doc.status === 'На согласовании').length;
-  const approved = ptoDocuments.filter(doc => doc.status === 'Утверждён').length;
-  const overdue = ptoDocuments.filter(isPtoOverdue).length;
+  const docs = state.ptoDocs;
+  const total = docs.length;
+  const inWork = docs.filter((doc) => ['На проверке', 'На согласовании'].includes(doc.status)).length;
+  const approved = docs.filter((doc) => doc.status === 'Утверждён').length;
+  const overdue = docs.filter(isPtoOverdue).length;
 
   container.innerHTML = `
-    <div class="stat-card">
-      <div class="number">${total}</div>
-      <div class="label">Найдено документов</div>
-    </div>
-    <div class="stat-card">
-      <div class="number blue">${inWork}</div>
-      <div class="label">В работе</div>
-    </div>
-    <div class="stat-card">
-      <div class="number green">${approved}</div>
-      <div class="label">Утверждено</div>
-    </div>
-    <div class="stat-card">
-      <div class="number ${overdue ? 'red' : 'yellow'}">${overdue}</div>
-      <div class="label">Просрочено</div>
-    </div>
+    <div class="stat-card"><div class="number">${total}</div><div class="label">Найдено документов</div></div>
+    <div class="stat-card"><div class="number blue">${inWork}</div><div class="label">В работе</div></div>
+    <div class="stat-card"><div class="number green">${approved}</div><div class="label">Утверждено</div></div>
+    <div class="stat-card"><div class="number ${overdue ? 'red' : 'yellow'}">${overdue}</div><div class="label">Просрочено</div></div>
   `;
 }
 
 function renderPtoTable() {
-  const container = document.getElementById('pto-list');
-  const emptyState = document.getElementById('pto-empty');
-
+  const container = $('pto-list');
+  const empty = $('pto-empty');
   if (!container) return;
 
-  if (ptoDocuments.length === 0) {
+  if (!state.ptoDocs.length) {
     container.innerHTML = '';
-    emptyState.classList.remove('hidden');
+    empty.classList.remove('hidden');
     return;
   }
 
-  emptyState.classList.add('hidden');
+  empty.classList.add('hidden');
 
-  container.innerHTML = ptoDocuments.map(doc => {
+  container.innerHTML = state.ptoDocs.map((doc) => {
     const overdue = isPtoOverdue(doc);
-    const shortType = PTO_TYPE_SHORT[doc.type] || doc.type;
     const revision = Number(doc.version) > 1 ? ` · ред. ${doc.version}` : '';
+    const shortType = {
+      'Исполнительная документация': 'ИД',
+      'ППР': 'ППР',
+      'Акт скрытых работ': 'АОСР',
+      'Журнал работ': 'ЖР',
+      'Входной контроль': 'ВК'
+    }[doc.type] || doc.type;
 
     return `
       <tr class="pto-row ${overdue ? 'pto-row-overdue' : ''}">
@@ -1587,60 +1131,60 @@ function renderPtoTable() {
   }).join('');
 }
 
+function ptoStatusClass(status) {
+  return {
+    'Черновик': 'draft',
+    'На проверке': 'check',
+    'На согласовании': 'review',
+    'Утверждён': 'approved',
+    'Отклонён': 'rejected',
+    'В архиве': 'archived'
+  }[status] || 'draft';
+}
+
 async function openPtoDoc(id) {
-  let doc;
+  const data = await apiJsonSafe(`${API_BASE}/pto/${id}`);
+  if (!data) return;
 
-  try {
-    const response = await apiFetch(`${API_BASE}/pto/${id}`);
-    const data = await response.json();
-
-    if (!data.success) {
-      alert('Ошибка: ' + (data.error || 'не удалось открыть документ'));
-      return;
-    }
-
-    doc = data.data;
-  } catch (error) {
-    if (isAuthError(error)) return;
-    alert('Ошибка подключения к серверу');
-    return;
-  }
-
+  const doc = data.data;
   const overdue = isPtoOverdue(doc);
-  const canManage = canManagePto();
-  const shortType = PTO_TYPE_SHORT[doc.type] || doc.type;
+  const canManage = state.permissions.pto;
 
-  const historyHtml = (doc.history || []).map(entry => {
-    const statusDelta = [entry.statusFrom, entry.statusTo].filter(Boolean).join(' → ');
-    const meta = [
-      statusDelta,
-      entry.version ? `ред. ${entry.version}` : '',
-      entry.author || ''
-    ].filter(Boolean).join(' · ');
+  const revisionsHtml = (doc.revisions || []).length
+    ? `<div class="revision-list">${doc.revisions.map((revision) => `
+        <div class="revision-item">
+          <div>
+            <strong>ред. ${revision.version}</strong>
+            ${revision.originalName ? ` · ${escapeHtml(revision.originalName)}` : ''}
+            <div class="pto-history-meta">${formatDateTime(revision.createdAt)} · ${escapeHtml(revision.author || '—')}${revision.comment ? ` · ${escapeHtml(revision.comment)}` : ''}</div>
+          </div>
+          ${revision.file ? `<a href="${escapeAttr(revision.file)}" target="_blank" rel="noopener">Скачать</a>` : '<span class="pto-history-meta">без файла</span>'}
+        </div>`).join('')}</div>`
+    : '<p class="card-hint">Редакции не загружались</p>';
 
-    return `
-      <li>
-        <div class="pto-history-action">
-          <strong>${escapeHtml(entry.action)}</strong>
-          <span class="pto-history-date">${formatDateTime(entry.date)}</span>
-        </div>
-        ${meta ? `<div class="pto-history-meta">${escapeHtml(meta)}</div>` : ''}
-        ${entry.comment ? `<div class="pto-history-comment">${escapeHtml(entry.comment)}</div>` : ''}
-      </li>
-    `;
-  }).join('');
+  const historyHtml = (doc.history || []).length
+    ? `<ul class="pto-history-list">${doc.history.map((entry) => `
+        <li>
+          <div class="pto-history-action">
+            <strong>${escapeHtml(entry.action)}</strong>
+            <span class="pto-history-date">${formatDateTime(entry.date)}</span>
+          </div>
+          ${[entry.statusFrom, entry.statusTo].filter(Boolean).length ? `<div class="pto-history-meta">${escapeHtml([entry.statusFrom, entry.statusTo].filter(Boolean).join(' → '))}${entry.version ? ` · ред. ${entry.version}` : ''}${entry.author ? ` · ${escapeHtml(entry.author)}` : ''}</div>` : ''}
+          ${entry.comment ? `<div class="pto-history-comment">${escapeHtml(entry.comment)}</div>` : ''}
+        </li>`).join('')}</ul>`
+    : '<p class="card-hint">Записей пока нет</p>';
 
-  const statusOptions = PTO_STATUSES
-    .filter(status => status !== doc.status)
-    .map(status => `<option value="${escapeAttr(status)}">${escapeHtml(status)}</option>`)
-    .join('');
+  const statusOptions = state.ptoMeta.statuses
+    .filter((status) => status !== doc.status)
+    .map((status) => `<option value="${escapeAttr(status)}">${escapeHtml(status)}</option>`).join('');
 
   openModal(`
     <div class="pto-detail">
       <div class="pto-detail-top">
-        <span class="pto-type-chip" title="${escapeAttr(doc.type)}">${escapeHtml(shortType)}</span>
+        <span class="pto-type-chip">${escapeHtml(doc.type)}</span>
         <span class="status-badge ${ptoStatusClass(doc.status)}">${escapeHtml(doc.status)}</span>
         ${overdue ? '<span class="status-badge rejected">Просрочен</span>' : ''}
+        ${doc.requiresOcr ? '<span class="status-badge check">Требует OCR</span>' : ''}
       </div>
 
       <h2>${escapeHtml(doc.title)}</h2>
@@ -1658,12 +1202,10 @@ async function openPtoDoc(id) {
 
       ${doc.content ? `<div class="pto-detail-text">${escapeHtml(doc.content)}</div>` : ''}
 
-      ${doc.file ? `
-        <div class="pdf-actions">
-          <a href="${escapeAttr(doc.file)}" target="_blank" rel="noopener" class="pdf-download-btn">📄 Открыть файл</a>
-          <a href="${escapeAttr(doc.file)}" download class="pdf-download-btn">Скачать файл</a>
-        </div>
-      ` : ''}
+      ${doc.file ? `<div class="pdf-actions">
+        <a href="${escapeAttr(doc.file)}" target="_blank" rel="noopener" class="pdf-download-btn">📄 Открыть файл</a>
+        <a href="${escapeAttr(doc.file)}" download class="pdf-download-btn">Скачать${doc.originalName ? ' · ' + escapeHtml(doc.originalName) : ''}</a>
+      </div>` : ''}
 
       ${canManage ? `
         <div class="pto-status-panel">
@@ -1674,90 +1216,59 @@ async function openPtoDoc(id) {
             <button type="button" class="btn btn-primary" onclick="changePtoStatus(${doc.id})">Применить</button>
           </div>
         </div>
-
         <div class="article-actions">
           <button class="btn btn-secondary btn-sm" onclick="openPtoForm(${doc.id})">✏️ Редактировать</button>
           <button class="btn btn-danger btn-sm" onclick="deletePtoDoc(${doc.id})">Удалить</button>
-        </div>
-      ` : ''}
+        </div>` : ''}
 
-      <div class="pto-history">
+      <div class="pto-detail-section">
         <h3>История документа</h3>
-        ${historyHtml
-          ? `<ul class="pto-history-list">${historyHtml}</ul>`
-          : '<p class="card-hint">Записей пока нет</p>'}
+        ${historyHtml}
+      </div>
+
+      <div class="pto-detail-section">
+        <h3>Редакции и файлы</h3>
+        ${revisionsHtml}
       </div>
     </div>
   `);
 }
 
 async function changePtoStatus(id) {
-  const status = document.getElementById('pto-status-select').value;
-  const comment = document.getElementById('pto-status-comment').value.trim();
+  const status = $('pto-status-select').value;
+  const comment = $('pto-status-comment').value.trim();
 
   try {
-    const response = await apiFetch(`${API_BASE}/pto/${id}/status`, {
+    await apiJson(`${API_BASE}/pto/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, comment })
     });
-
-    const data = await response.json();
-
-    if (data.success) {
-      await loadPtoDocuments();
-      await openPtoDoc(id);
-    } else {
-      alert('Ошибка: ' + (data.error || 'не удалось сменить статус'));
-    }
+    await loadPtoDocuments();
+    await openPtoDoc(id);
+    toast('Статус изменён');
   } catch (error) {
-    if (isAuthError(error)) return;
-    alert('Ошибка подключения к серверу');
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
   }
 }
 
-async function openPtoForm(docId = null) {
-  if (!canManagePto()) return;
+async function openPtoForm(id) {
+  if (!state.permissions.pto) return;
 
   let doc = null;
-
-  if (docId) {
-    try {
-      const response = await apiFetch(`${API_BASE}/pto/${docId}`);
-      const data = await response.json();
-
-      if (!data.success) {
-        alert('Ошибка: ' + (data.error || 'не удалось открыть документ'));
-        return;
-      }
-
-      doc = data.data;
-    } catch (error) {
-      if (isAuthError(error)) return;
-      alert('Ошибка подключения к серверу');
-      return;
-    }
+  if (id) {
+    const data = await apiJsonSafe(`${API_BASE}/pto/${id}`);
+    if (!data) return;
+    doc = data.data;
   }
 
-  const typeOptions = PTO_TYPES.map(type => `
-    <option value="${escapeAttr(type)}" ${doc && doc.type === type ? 'selected' : ''}>${escapeHtml(type)}</option>
-  `).join('');
-
-  const objectOptions = ptoObjects.map(object => `
-    <option value="${object.id}" ${doc && Number(doc.objectId) === Number(object.id) ? 'selected' : ''}>
-      ${escapeHtml(object.name)}
-    </option>
-  `).join('');
-
-  const statusOptions = PTO_STATUSES.map(status => `
-    <option value="${escapeAttr(status)}" ${doc ? (doc.status === status ? 'selected' : '') : (status === 'Черновик' ? 'selected' : '')}>
-      ${escapeHtml(status)}
-    </option>
-  `).join('');
+  const typeOptions = state.ptoMeta.types.map((type) => `<option value="${escapeAttr(type)}" ${doc && doc.type === type ? 'selected' : ''}>${escapeHtml(type)}</option>`).join('');
+  const objectOptions = state.objects.map((object) => `<option value="${object.id}" ${doc && Number(doc.objectId) === Number(object.id) ? 'selected' : ''}>${escapeHtml(object.name)}</option>`).join('');
+  const statusOptions = state.ptoMeta.statuses.map((status) => `<option value="${escapeAttr(status)}" ${doc ? (doc.status === status ? 'selected' : '') : (status === 'Черновик' ? 'selected' : '')}>${escapeHtml(status)}</option>`).join('');
 
   openModal(`
     <h2>${doc ? 'Редактировать документ ПТО' : 'Новый документ ПТО'}</h2>
-
     <form id="pto-doc-form" class="modal-form">
       <div id="pto-form-error" class="error-message hidden"></div>
 
@@ -1768,16 +1279,13 @@ async function openPtoForm(docId = null) {
         </div>
         <div class="form-group">
           <label for="pto-form-object">Объект</label>
-          <select id="pto-form-object">
-            <option value="">Без объекта</option>
-            ${objectOptions}
-          </select>
+          <select id="pto-form-object"><option value="">Без объекта</option>${objectOptions}</select>
         </div>
       </div>
 
       <div class="form-group">
         <label for="pto-form-title">Наименование <span class="required">*</span></label>
-        <input type="text" id="pto-form-title" value="${escapeAttr(doc ? doc.title : '')}" placeholder="Например: Исполнительная документация по вентиляции" required>
+        <input type="text" id="pto-form-title" value="${escapeAttr(doc ? doc.title : '')}" required>
       </div>
 
       <div class="form-row">
@@ -1809,252 +1317,1155 @@ async function openPtoForm(docId = null) {
 
       <div class="form-group">
         <label for="pto-form-content">Описание</label>
-        <textarea id="pto-form-content" rows="5" placeholder="Что входит в документ, замечания, комментарии">${escapeHtml(doc ? (doc.content || '') : '')}</textarea>
+        <textarea id="pto-form-content" rows="4">${escapeHtml(doc ? (doc.content || '') : '')}</textarea>
       </div>
 
       <div class="form-group">
-        <label for="pto-form-file">Файл документа (PDF, DOC, DOCX, XLS, XLSX)</label>
-        <input type="file" id="pto-form-file" accept=".pdf,.doc,.docx,.xls,.xlsx" class="pto-file-input">
-        <p class="file-hint">Максимальный размер: 20 МБ${doc && doc.file ? ' · текущий файл сохранится, если не выбрать новый' : ''}</p>
+        <label for="pto-form-file">Файл (PDF, DOCX, XLSX)</label>
+        <input type="file" id="pto-form-file" class="pto-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx">
+        <span class="field-hint">${doc && doc.originalName ? `Текущий файл: ${escapeHtml(doc.originalName)}. Новый файл создаст новую редакцию.` : 'Максимальный размер 20 МБ'}</span>
       </div>
 
-      ${doc ? `
-        <label class="pto-checkbox">
-          <input type="checkbox" id="pto-form-revision">
-          <span>Отметить как новую редакцию (версия ${Number(doc.version) + 1})</span>
-        </label>
-      ` : ''}
+      ${doc ? `<label class="pto-checkbox">
+        <input type="checkbox" id="pto-form-revision">
+        <span>Отметить как новую редакцию (ред. ${Number(doc.version) + 1})</span>
+      </label>` : ''}
+
+      <div class="form-group">
+        <label for="pto-form-comment">Комментарий к изменению</label>
+        <input type="text" id="pto-form-comment" placeholder="Например: замечания устранены">
+      </div>
 
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary">${doc ? 'Сохранить изменения' : 'Добавить документ'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+        <button type="submit" class="btn btn-primary">${doc ? 'Сохранить' : 'Создать'}</button>
       </div>
     </form>
   `);
 
-  document.getElementById('pto-doc-form').addEventListener('submit', (e) => handlePtoSubmit(e, doc));
-}
+  $('pto-doc-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const errorEl = $('pto-form-error');
+    errorEl.classList.add('hidden');
 
-async function handlePtoSubmit(e, doc) {
-  e.preventDefault();
+    const formData = new FormData();
+    formData.append('type', $('pto-form-type').value);
+    formData.append('title', $('pto-form-title').value.trim());
+    formData.append('objectId', $('pto-form-object').value);
+    formData.append('cipher', $('pto-form-cipher').value.trim());
+    formData.append('projectSection', $('pto-form-section').value.trim());
+    formData.append('status', $('pto-form-status').value);
+    formData.append('dueDate', $('pto-form-due').value);
+    formData.append('responsible', $('pto-form-responsible').value.trim());
+    formData.append('content', $('pto-form-content').value.trim());
+    formData.append('comment', $('pto-form-comment').value.trim());
 
-  const errorEl = document.getElementById('pto-form-error');
-  errorEl.classList.add('hidden');
+    const file = $('pto-form-file').files[0];
+    if (file) formData.append('docFile', file);
+    if (doc && $('pto-form-revision') && $('pto-form-revision').checked) formData.append('newRevision', 'true');
 
-  const type = document.getElementById('pto-form-type').value;
-  const title = document.getElementById('pto-form-title').value.trim();
+    try {
+      const result = await apiJson(doc ? `${API_BASE}/pto/${doc.id}` : `${API_BASE}/pto`, {
+        method: doc ? 'PUT' : 'POST',
+        body: formData
+      });
 
-  if (!title) {
-    showError(errorEl, 'Введите наименование документа');
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append('type', type);
-  formData.append('title', title);
-  formData.append('objectId', document.getElementById('pto-form-object').value || '');
-  formData.append('cipher', document.getElementById('pto-form-cipher').value.trim());
-  formData.append('projectSection', document.getElementById('pto-form-section').value.trim());
-  formData.append('status', document.getElementById('pto-form-status').value);
-  formData.append('dueDate', document.getElementById('pto-form-due').value || '');
-  formData.append('responsible', document.getElementById('pto-form-responsible').value.trim());
-  formData.append('content', document.getElementById('pto-form-content').value.trim());
-
-  const fileInput = document.getElementById('pto-form-file');
-  if (fileInput.files[0]) {
-    formData.append('docFile', fileInput.files[0]);
-  }
-
-  if (doc) {
-    const revisionInput = document.getElementById('pto-form-revision');
-    formData.append('newRevision', revisionInput && revisionInput.checked ? 'true' : 'false');
-  }
-
-  try {
-    const response = await apiFetch(doc ? `${API_BASE}/pto/${doc.id}` : `${API_BASE}/pto`, {
-      method: doc ? 'PUT' : 'POST',
-      body: formData
-    });
-
-    const data = await response.json();
-
-    if (data.success) {
-      const savedId = doc ? doc.id : data.data.id;
       closeModal();
       await loadPtoDocuments();
+      const savedId = doc ? doc.id : result.data.id;
       await openPtoDoc(savedId);
-    } else {
-      showError(errorEl, data.error || 'Не удалось сохранить документ');
+      toast('Документ сохранён');
+    } catch (error) {
+      if (error instanceof AuthError) return;
+      showError(errorEl, error.message);
     }
-  } catch (error) {
-    if (isAuthError(error)) return;
-    showError(errorEl, 'Ошибка подключения к серверу');
-  }
+  });
 }
 
 async function deletePtoDoc(id) {
-  if (!confirm('Удалить документ ПТО? Записи истории документа тоже будут удалены.')) return;
+  if (!confirm('Удалить документ? История и редакции будут удалены безвозвратно.')) return;
 
   try {
-    const response = await apiFetch(`${API_BASE}/pto/${id}`, { method: 'DELETE' });
-    const data = await response.json();
-
-    if (data.success) {
-      closeModal();
-      await loadPtoDocuments();
-    } else {
-      alert('Ошибка: ' + (data.error || 'не удалось удалить документ'));
-    }
+    await apiJson(`${API_BASE}/pto/${id}`, { method: 'DELETE' });
+    closeModal();
+    await loadPtoDocuments();
+    toast('Документ удалён');
   } catch (error) {
-    if (isAuthError(error)) return;
-    alert('Ошибка подключения к серверу');
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
   }
 }
 
-function exportPtoRegistry() {
+function exportPto() {
   const params = new URLSearchParams();
-
-  if (ptoFilterType !== 'all') params.set('type', ptoFilterType);
-  if (ptoFilterObject !== 'all') params.set('objectId', ptoFilterObject);
-  if (ptoFilterStatus !== 'all') params.set('status', ptoFilterStatus);
-  if (ptoSearch) params.set('q', ptoSearch);
-  if (ptoOnlyOverdue) params.set('overdue', '1');
+  const filters = state.ptoFilters;
+  if (filters.type !== 'all') params.set('type', filters.type);
+  if (filters.objectId !== 'all') params.set('objectId', filters.objectId);
+  if (filters.status !== 'all') params.set('status', filters.status);
+  if (filters.q) params.set('q', filters.q);
+  if (filters.overdue) params.set('overdue', '1');
 
   const query = params.toString();
   window.location.href = `${API_BASE}/pto/export.csv${query ? '?' + query : ''}`;
 }
 
 function renderObjects() {
-  const container = document.getElementById('objects-list');
+  const container = $('objects-list');
   if (!container) return;
 
-  if (ptoObjects.length === 0) {
+  if (!state.objects.length) {
     container.innerHTML = '<p class="card-hint">Объекты пока не добавлены</p>';
     return;
   }
 
-  container.innerHTML = ptoObjects.map(object => {
-    const details = [object.address, object.customer].filter(Boolean).map(value => escapeHtml(value)).join(' · ');
-
-    return `
-      <div class="object-row">
-        <div class="object-main">
-          <strong>${escapeHtml(object.name)}</strong>
-          <span>${details || 'адрес и заказчик не указаны'}</span>
-        </div>
-        <span class="object-count">${object.documentsCount} док.</span>
-        ${canManagePto() ? `<button type="button" class="action-btn delete" onclick="deleteObject(${object.id})">Удалить</button>` : ''}
+  container.innerHTML = state.objects.map((object) => `
+    <div class="object-row">
+      <div class="object-main">
+        <strong>${escapeHtml(object.name)}</strong>
+        <span>${escapeHtml([object.address, object.customer].filter(Boolean).join(' · ') || 'адрес и заказчик не указаны')}</span>
       </div>
-    `;
-  }).join('');
+      <span class="object-count">${object.documentsCount} док.</span>
+      ${state.permissions.pto ? `<button type="button" class="action-btn delete" onclick="deleteObject(${object.id})">Удалить</button>` : ''}
+    </div>
+  `).join('');
 }
 
-async function handleAddObject(e) {
-  e.preventDefault();
-
-  const errorEl = document.getElementById('object-form-error');
-  const successEl = document.getElementById('object-form-success');
+async function handleAddObject(event) {
+  event.preventDefault();
+  const errorEl = $('object-form-error');
+  const successEl = $('object-form-success');
   errorEl.classList.add('hidden');
   successEl.classList.add('hidden');
 
-  const name = document.getElementById('new-object-name').value.trim();
-  const address = document.getElementById('new-object-address').value.trim();
-  const customer = document.getElementById('new-object-customer').value.trim();
-
-  if (!name) {
-    showError(errorEl, 'Введите название объекта');
-    return;
-  }
-
   try {
-    const response = await apiFetch(`${API_BASE}/objects`, {
+    await apiJson(`${API_BASE}/objects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, address, customer })
+      body: JSON.stringify({
+        name: $('new-object-name').value.trim(),
+        address: $('new-object-address').value.trim(),
+        customer: $('new-object-customer').value.trim()
+      })
     });
 
-    const data = await response.json();
-
-    if (data.success) {
-      successEl.textContent = 'Объект добавлен';
-      successEl.classList.remove('hidden');
-      document.getElementById('new-object-name').value = '';
-      document.getElementById('new-object-address').value = '';
-      document.getElementById('new-object-customer').value = '';
-      await loadPtoObjects();
-    } else {
-      showError(errorEl, data.error || 'Не удалось добавить объект');
-    }
+    ['new-object-name', 'new-object-address', 'new-object-customer'].forEach((id) => { $(id).value = ''; });
+    successEl.textContent = 'Объект добавлен';
+    successEl.classList.remove('hidden');
+    await loadPtoObjects();
   } catch (error) {
-    if (isAuthError(error)) return;
-    showError(errorEl, 'Ошибка подключения к серверу');
+    if (error instanceof AuthError) return;
+    showError(errorEl, error.message);
   }
 }
 
 async function deleteObject(id) {
-  if (!confirm('Удалить объект? Удалить можно только объект без документов.')) return;
+  if (!confirm('Удалить объект? Удаление возможно только для объекта без документов и замечаний.')) return;
+  try {
+    await apiJson(`${API_BASE}/objects/${id}`, { method: 'DELETE' });
+    await loadPtoObjects();
+    toast('Объект удалён');
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+  }
+}
+
+// --- Панель ПТО ---
+
+async function loadDashboard() {
+  renderObjectSelects();
+
+  const objectId = $('dashboard-object').value || 'all';
+  const query = objectId !== 'all' ? `?objectId=${objectId}` : '';
+
+  const summary = await apiJsonSafe(`${API_BASE}/reports/summary${query}`);
+  if (!summary) return;
+
+  const data = summary.data;
+  $('dashboard-stats').innerHTML = `
+    <div class="stat-card"><div class="number">${data.total}</div><div class="label">Всего документов</div></div>
+    <div class="stat-card"><div class="number blue">${data.inWork}</div><div class="label">В работе</div></div>
+    <div class="stat-card"><div class="number green">${data.approved}</div><div class="label">Утверждено</div></div>
+    <div class="stat-card"><div class="number ${data.overdue ? 'red' : 'yellow'}">${data.overdue}</div><div class="label">Просрочено</div></div>
+    <div class="stat-card"><div class="number ${data.remarksOpen ? 'red' : ''}">${data.remarksOpen}</div><div class="label">Незакрытых замечаний</div></div>
+    <div class="stat-card"><div class="number ${data.setsIncomplete ? 'red' : ''}">${data.setsIncomplete}</div><div class="label">Неполных комплектов</div></div>
+    <div class="stat-card"><div class="number">${data.setsComplete}</div><div class="label">Комплектов готово</div></div>
+    <div class="stat-card"><div class="number">${data.onTimePercent === null ? '—' : data.onTimePercent + '%'}</div><div class="label">Сдано в срок</div></div>
+  `;
+
+  const overdueDocs = await apiJsonSafe(`${API_BASE}/pto?overdue=1&limit=6${objectId !== 'all' ? '&objectId=' + objectId : ''}`);
+  const overdueContainer = $('dashboard-overdue');
+  const docs = overdueDocs ? overdueDocs.data : [];
+  overdueContainer.innerHTML = docs.length
+    ? docs.map((doc) => `
+        <div class="compact-item">
+          <button onclick="openPtoDoc(${doc.id})">${escapeHtml(doc.title)}</button>
+          <span class="compact-date">${formatDate(doc.dueDate)}</span>
+        </div>`).join('')
+    : '<div class="compact-empty">Просроченных документов нет</div>';
+
+  const remarksData = await apiJsonSafe(`${API_BASE}/remarks?limit=100${objectId !== 'all' ? '&objectId=' + objectId : ''}`);
+  const openRemarks = remarksData ? remarksData.data.filter((remark) => !['Закрыто', 'Отклонено', 'Устранено'].includes(remark.status)) : [];
+  const remarksContainer = $('dashboard-remarks');
+  remarksContainer.innerHTML = openRemarks.length
+    ? openRemarks.slice(0, 6).map((remark) => `
+        <div class="compact-item">
+          <button onclick="openRemarkDetail(${remark.id})">${escapeHtml(remark.number || '№' + remark.id)}: ${escapeHtml(remark.description.slice(0, 60))}</button>
+          <span class="compact-date">${formatDate(remark.dueDate)}</span>
+        </div>`).join('')
+    : '<div class="compact-empty">Незакрытых замечаний нет</div>';
+}
+
+async function runGlobalSearch() {
+  const query = $('global-search').value.trim();
+  const container = $('global-search-results');
+
+  if (query.length < 2) {
+    container.innerHTML = '<div class="compact-empty">Введите минимум 2 символа</div>';
+    return;
+  }
+
+  const data = await apiJsonSafe(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
+  if (!data) return;
+
+  container.innerHTML = data.data.length
+    ? data.data.map((item) => `
+        <button class="search-result" onclick="${item.kind === 'document' ? `openPtoDoc(${item.id})` : `openArticleModal(${item.id})`}">
+          ${item.title}
+          <span class="search-kind">${item.kind === 'document' ? 'Документ ПТО' : 'Инструкция'}${item.fragment ? ' · ' + (item.fragment || '') : ''}</span>
+        </button>`).join('')
+    : `<div class="compact-empty">Ничего не найдено (движок: ${data.engine})</div>`;
+}
+
+// --- Комплектность ИД ---
+
+async function loadCompleteness() {
+  const data = await apiJsonSafe(`${API_BASE}/completeness`);
+  const container = $('completeness-list');
+  const empty = $('completeness-empty');
+  const sets = data ? data.data : [];
+
+  if (!sets.length) {
+    container.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+
+  empty.classList.add('hidden');
+  container.innerHTML = sets.map((set) => `
+    <div class="set-card">
+      <div class="set-card-header">
+        <div>
+          <h3>${escapeHtml(set.name)}</h3>
+          <div class="set-meta">${escapeHtml(set.objectName || 'Объект не указан')}${set.responsible ? ' · ' + escapeHtml(set.responsible) : ''}</div>
+        </div>
+        <div class="section-actions">
+          <button class="btn btn-light btn-sm" onclick="openSetDetail(${set.id})">Открыть</button>
+          ${state.permissions.pto ? `<button class="btn btn-danger btn-sm" onclick="deleteSet(${set.id})">Удалить</button>` : ''}
+        </div>
+      </div>
+      <div class="progress"><span style="width:${set.stats.percent}%"></span></div>
+      <div class="progress-label">
+        Позиций: ${set.stats.total} · готово: ${set.stats.complete} · в работе: ${set.stats.inWork} · отсутствует: ${set.stats.missing}
+      </div>
+    </div>
+  `).join('');
+}
+
+function openSetForm() {
+  if (!state.permissions.pto) return;
+
+  openModal(`
+    <h2>Новый комплект ИД</h2>
+    <form id="set-form" class="modal-form">
+      <div id="set-form-error" class="error-message hidden"></div>
+      <div class="form-group">
+        <label for="set-name">Название комплекта <span class="required">*</span></label>
+        <input type="text" id="set-name" placeholder="Например: ИД по электроснабжению" required>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="set-object">Объект</label>
+          <select id="set-object"><option value="">Без объекта</option>${state.objects.map((object) => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('')}</select>
+        </div>
+        <div class="form-group">
+          <label for="set-responsible">Ответственный</label>
+          <input type="text" id="set-responsible" placeholder="ФИО">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="set-note">Примечание</label>
+        <textarea id="set-note" rows="2"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+        <button type="submit" class="btn btn-primary">Создать</button>
+      </div>
+    </form>
+  `);
+
+  $('set-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await apiJson(`${API_BASE}/completeness`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: $('set-name').value.trim(),
+          objectId: $('set-object').value || null,
+          responsible: $('set-responsible').value.trim(),
+          note: $('set-note').value.trim()
+        })
+      });
+      closeModal();
+      await loadCompleteness();
+      toast('Комплект создан');
+    } catch (error) {
+      if (error instanceof AuthError) return;
+      showError($('set-form-error'), error.message);
+    }
+  });
+}
+
+async function openSetDetail(id) {
+  const data = await apiJsonSafe(`${API_BASE}/completeness/${id}`);
+  if (!data) return;
+
+  const set = data.data;
+  const canManage = state.permissions.pto;
+
+  const documentsData = await apiJsonSafe(`${API_BASE}/pto?limit=500${set.objectId ? '&objectId=' + set.objectId : ''}`);
+  const documents = documentsData ? documentsData.data : [];
+
+  const requirementRows = set.requirements.map((requirement) => `
+    <tr>
+      <td>${escapeHtml(requirement.name)}<div class="pto-doc-sub">${escapeHtml(requirement.type || 'любой тип')}${requirement.required ? ' · обязательное' : ''}</div></td>
+      <td>
+        ${requirement.documents.length
+          ? requirement.documents.map((doc) => `<span class="doc-chip">${escapeHtml(doc.title)} <span class="chip-status">(${escapeHtml(doc.status)})</span>${canManage ? `<button onclick="unlinkDocument(${requirement.id}, ${doc.id}, ${set.id})" title="Отвязать">✕</button>` : ''}</span>`).join('')
+          : '<span class="pto-overdue">нет документа</span>'}
+      </td>
+      <td>${requirement.state || ''}</td>
+      <td>
+        ${canManage ? `
+          <select class="filter-select" style="min-width:160px" onchange="linkDocument(${requirement.id}, this.value, ${set.id})">
+            <option value="">Привязать документ…</option>
+            ${documents.map((doc) => `<option value="${doc.id}">${escapeHtml(doc.title)}</option>`).join('')}
+          </select>` : ''}
+      </td>
+    </tr>
+  `).join('');
+
+  openModal(`
+    <h2>${escapeHtml(set.name)}</h2>
+    <div class="pto-detail-grid">
+      <div><span>Объект</span><strong>${escapeHtml(set.objectName || '—')}</strong></div>
+      <div><span>Ответственный</span><strong>${escapeHtml(set.responsible || '—')}</strong></div>
+      <div><span>Готовность</span><strong>${set.stats.percent}%</strong></div>
+      <div><span>Отсутствует</span><strong class="${set.stats.missing ? 'pto-overdue' : ''}">${set.stats.missing}</strong></div>
+    </div>
+    ${set.note ? `<div class="pto-detail-text">${escapeHtml(set.note)}</div>` : ''}
+
+    <div class="table-container">
+      <table class="requirements-table">
+        <thead><tr><th>Требование</th><th>Документы</th><th>Состояние</th><th></th></tr></thead>
+        <tbody>${requirementRows || '<tr><td colspan="4">Требования ещё не добавлены</td></tr>'}</tbody>
+      </table>
+    </div>
+
+    ${canManage ? `
+      <div class="pto-detail-section">
+        <h3>Добавить требование</h3>
+        <form id="requirement-form" class="modal-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="requirement-name">Название позиции <span class="required">*</span></label>
+              <input type="text" id="requirement-name" placeholder="Например: Акты освидетельствования скрытых работ" required>
+            </div>
+            <div class="form-group">
+              <label for="requirement-type">Тип документа</label>
+              <select id="requirement-type"><option value="">Любой</option>${state.ptoMeta.types.map((type) => `<option value="${escapeAttr(type)}">${escapeHtml(type)}</option>`).join('')}</select>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Добавить</button>
+          </div>
+        </form>
+      </div>` : ''}
+
+    <div class="modal-actions-row">
+      <a class="btn btn-light" href="${API_BASE}/completeness/${set.id}/missing.csv">Отчёт о недостающих (CSV)</a>
+    </div>
+  `);
+
+  if (canManage && $('requirement-form')) {
+    $('requirement-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await apiJson(`${API_BASE}/completeness/${set.id}/requirements`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: $('requirement-name').value.trim(), type: $('requirement-type').value || null })
+        });
+        await openSetDetail(set.id);
+        await loadCompleteness();
+      } catch (error) {
+        if (error instanceof AuthError) return;
+        toast(error.message, 'error');
+      }
+    });
+  }
+}
+
+async function linkDocument(requirementId, documentId, setId) {
+  if (!documentId) return;
+  try {
+    await apiJson(`${API_BASE}/completeness/requirements/${requirementId}/documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentId: Number(documentId) })
+    });
+    await loadCompleteness();
+    if (setId) await openSetDetail(setId);
+    toast('Документ привязан');
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+  }
+}
+
+async function unlinkDocument(requirementId, documentId, setId) {
+  try {
+    await apiJson(`${API_BASE}/completeness/requirements/${requirementId}/documents/${documentId}`, { method: 'DELETE' });
+    await loadCompleteness();
+    if (setId) await openSetDetail(setId);
+    toast('Документ отвязан');
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+  }
+}
+
+async function deleteSet(id) {
+  if (!confirm('Удалить комплект? Документы и замечания не удаляются.')) return;
+  try {
+    await apiJson(`${API_BASE}/completeness/${id}`, { method: 'DELETE' });
+    await loadCompleteness();
+    toast('Комплект удалён');
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+  }
+}
+
+// --- Замечания ---
+
+async function loadRemarkStatuses() {
+  const data = await apiJsonSafe(`${API_BASE}/remark-statuses`);
+  state.remarkStatuses = data ? data.data : [];
+
+  const select = $('remarks-filter-status');
+  if (select) {
+    select.innerHTML = '<option value="all">Все статусы</option>' +
+      state.remarkStatuses.map((status) => `<option value="${escapeAttr(status.name)}">${escapeHtml(status.name)}</option>`).join('');
+  }
+}
+
+async function loadRemarks() {
+  if (!state.remarkStatuses.length) await loadRemarkStatuses();
+
+  const params = new URLSearchParams();
+  const filters = state.remarkFilters;
+  if (filters.status !== 'all') params.set('status', filters.status);
+  if (filters.objectId !== 'all') params.set('objectId', filters.objectId);
+  if (filters.q) params.set('q', filters.q);
+  if (filters.overdue) params.set('overdue', '1');
+
+  const data = await apiJsonSafe(`${API_BASE}/remarks?${params.toString()}`);
+  state.remarks = data ? data.data : [];
+  renderRemarks();
+}
+
+function renderRemarks() {
+  const container = $('remarks-list');
+  const empty = $('remarks-empty');
+  if (!container) return;
+
+  const closed = ['Закрыто', 'Отклонено', 'Устранено'];
+  const overdue = state.remarks.filter((remark) => remark.dueDate && remark.dueDate < todayIso() && !closed.includes(remark.status)).length;
+
+  $('remarks-stats').innerHTML = `
+    <div class="stat-card"><div class="number">${state.remarks.length}</div><div class="label">Найдено</div></div>
+    <div class="stat-card"><div class="number blue">${state.remarks.filter((remark) => !closed.includes(remark.status)).length}</div><div class="label">В работе</div></div>
+    <div class="stat-card"><div class="number ${overdue ? 'red' : 'yellow'}">${overdue}</div><div class="label">Просрочено</div></div>
+  `;
+
+  if (!state.remarks.length) {
+    container.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+
+  empty.classList.add('hidden');
+  container.innerHTML = state.remarks.map((remark) => {
+    const isOverdue = remark.dueDate && remark.dueDate < todayIso() && !closed.includes(remark.status);
+    const statusClass = closed.includes(remark.status) ? 'closed' : (isOverdue ? 'overdue' : '');
+
+    return `
+      <tr>
+        <td>${escapeHtml(remark.number || '—')}<div class="pto-doc-sub">${escapeHtml(remark.authorName || '')}</div></td>
+        <td>${formatDate(remark.date)}</td>
+        <td>${escapeHtml(remark.objectName || '—')}${remark.documentTitle ? `<div class="pto-doc-sub">${escapeHtml(remark.documentTitle)}</div>` : ''}</td>
+        <td class="remark-desc">${escapeHtml(remark.description)}</td>
+        <td>${escapeHtml(remark.responsible || '—')}</td>
+        <td class="${isOverdue ? 'pto-overdue' : ''}">${formatDate(remark.dueDate)}</td>
+        <td><span class="remark-status ${statusClass}">${escapeHtml(remark.status)}</span></td>
+        <td><button class="action-btn edit" onclick="openRemarkDetail(${remark.id})">Открыть</button></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function openRemarkForm() {
+  if (!state.permissions.pto) return;
+  if (!state.remarkStatuses.length) await loadRemarkStatuses();
+
+  const documentsData = await apiJsonSafe(`${API_BASE}/pto?limit=500`);
+  const documents = documentsData ? documentsData.data : [];
+
+  openModal(`
+    <h2>Новое замечание</h2>
+    <form id="remark-form" class="modal-form">
+      <div id="remark-form-error" class="error-message hidden"></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="remark-object">Объект</label>
+          <select id="remark-object"><option value="">Без объекта</option>${state.objects.map((object) => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('')}</select>
+        </div>
+        <div class="form-group">
+          <label for="remark-document">Документ</label>
+          <select id="remark-document"><option value="">Без документа</option>${documents.map((doc) => `<option value="${doc.id}">${escapeHtml(doc.title)}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="remark-description">Описание замечания <span class="required">*</span></label>
+        <textarea id="remark-description" rows="4" required></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="remark-responsible">Ответственный</label>
+          <input type="text" id="remark-responsible" placeholder="ФИО">
+        </div>
+        <div class="form-group">
+          <label for="remark-due">Срок устранения</label>
+          <input type="date" id="remark-due">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="remark-status">Статус</label>
+          <select id="remark-status">${state.remarkStatuses.map((status) => `<option value="${escapeAttr(status.name)}">${escapeHtml(status.name)}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+        <button type="submit" class="btn btn-primary">Создать</button>
+      </div>
+    </form>
+  `);
+
+  $('remark-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await apiJson(`${API_BASE}/remarks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          objectId: $('remark-object').value || null,
+          documentId: $('remark-document').value || null,
+          description: $('remark-description').value.trim(),
+          responsible: $('remark-responsible').value.trim(),
+          dueDate: $('remark-due').value || null,
+          status: $('remark-status').value
+        })
+      });
+      closeModal();
+      await loadRemarks();
+      toast('Замечание создано');
+    } catch (error) {
+      if (error instanceof AuthError) return;
+      showError($('remark-form-error'), error.message);
+    }
+  });
+}
+
+async function openRemarkDetail(id) {
+  const data = await apiJsonSafe(`${API_BASE}/remarks/${id}`);
+  if (!data) return;
+
+  const remark = data.data;
+  const canManage = state.permissions.pto;
+  const closed = ['Закрыто', 'Отклонено', 'Устранено'].includes(remark.status);
+  const isOverdue = remark.dueDate && remark.dueDate < todayIso() && !closed;
+
+  const comments = (remark.comments || []).map((comment) => `
+    <div class="remark-comment">
+      <div class="remark-comment-meta">${formatDateTime(comment.createdAt)} · ${escapeHtml(comment.author || '—')}</div>
+      ${escapeHtml(comment.text)}
+    </div>`).join('');
+
+  const attachments = (remark.attachments || []).map((file) => `
+    <div class="compact-item">
+      <a href="${escapeAttr(file.file)}" target="_blank" rel="noopener">${escapeHtml(file.originalName || 'Файл')}</a>
+      <span class="compact-date">${formatDate(file.createdAt)}</span>
+    </div>`).join('');
+
+  const history = (remark.history || []).map((entry) => `
+    <li>
+      <div class="pto-history-action"><strong>${escapeHtml(entry.action)}</strong><span class="pto-history-date">${formatDateTime(entry.date)}</span></div>
+      ${[entry.statusFrom, entry.statusTo].filter(Boolean).length ? `<div class="pto-history-meta">${escapeHtml([entry.statusFrom, entry.statusTo].filter(Boolean).join(' → '))} · ${escapeHtml(entry.author || '')}</div>` : ''}
+    </li>`).join('');
+
+  openModal(`
+    <div class="pto-detail">
+      <div class="pto-detail-top">
+        <span class="remark-status ${closed ? 'closed' : (isOverdue ? 'overdue' : '')}">${escapeHtml(remark.status)}</span>
+        ${isOverdue ? '<span class="status-badge rejected">Просрочено</span>' : ''}
+      </div>
+      <h2>${escapeHtml(remark.number || 'Замечание')}</h2>
+      <div class="pto-detail-grid">
+        <div><span>Объект</span><strong>${escapeHtml(remark.objectName || '—')}</strong></div>
+        <div><span>Документ</span><strong>${escapeHtml(remark.documentTitle || '—')}</strong></div>
+        <div><span>Дата</span><strong>${formatDate(remark.date)}</strong></div>
+        <div><span>Срок</span><strong class="${isOverdue ? 'pto-overdue' : ''}">${formatDate(remark.dueDate)}</strong></div>
+        <div><span>Ответственный</span><strong>${escapeHtml(remark.responsible || '—')}</strong></div>
+        <div><span>Закрыто</span><strong>${formatDate(remark.closedAt)}</strong></div>
+      </div>
+
+      <div class="pto-detail-text">${escapeHtml(remark.description)}</div>
+
+      ${canManage ? `
+        <div class="pto-status-panel">
+          <h3>Смена статуса</h3>
+          <div class="pto-status-row">
+            <select id="remark-status-select" class="filter-select">
+              ${state.remarkStatuses.filter((status) => status.name !== remark.status).map((status) => `<option value="${escapeAttr(status.name)}">${escapeHtml(status.name)}</option>`).join('')}
+            </select>
+            <input type="text" id="remark-status-comment" class="search-input" placeholder="Комментарий">
+            <button type="button" class="btn btn-primary" onclick="changeRemarkStatus(${remark.id})">Применить</button>
+          </div>
+        </div>` : ''}
+
+      <div class="pto-detail-section">
+        <h3>Комментарии</h3>
+        ${comments || '<p class="card-hint">Комментариев пока нет</p>'}
+        <div class="pto-status-row" style="margin-top:10px">
+          <input type="text" id="remark-comment-input" class="search-input" placeholder="Добавить комментарий">
+          <button type="button" class="btn btn-secondary" onclick="addRemarkComment(${remark.id})">Добавить</button>
+        </div>
+      </div>
+
+      <div class="pto-detail-section">
+        <h3>Вложения</h3>
+        ${attachments || '<p class="card-hint">Вложений нет</p>'}
+        ${canManage ? `<div class="pto-status-row" style="margin-top:10px">
+          <input type="file" id="remark-file-input" class="pto-file-input">
+          <button type="button" class="btn btn-secondary" onclick="uploadRemarkAttachment(${remark.id})">Приложить</button>
+        </div>` : ''}
+      </div>
+
+      <div class="pto-detail-section">
+        <h3>История</h3>
+        <ul class="pto-history-list">${history || '<li>Записей пока нет</li>'}</ul>
+      </div>
+    </div>
+  `);
+}
+
+async function changeRemarkStatus(id) {
+  const status = $('remark-status-select').value;
+  const comment = $('remark-status-comment').value.trim();
+  try {
+    await apiJson(`${API_BASE}/remarks/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, comment })
+    });
+    await loadRemarks();
+    await openRemarkDetail(id);
+    toast('Статус замечания изменён');
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+  }
+}
+
+async function addRemarkComment(id) {
+  const text = $('remark-comment-input').value.trim();
+  if (!text) return;
+  try {
+    await apiJson(`${API_BASE}/remarks/${id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    await openRemarkDetail(id);
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
+  }
+}
+
+async function uploadRemarkAttachment(id) {
+  const input = $('remark-file-input');
+  if (!input || !input.files[0]) {
+    toast('Выберите файл', 'error');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', input.files[0]);
 
   try {
-    const response = await apiFetch(`${API_BASE}/objects/${id}`, { method: 'DELETE' });
-    const data = await response.json();
-
-    if (data.success) {
-      await loadPtoObjects();
-      await loadPtoDocuments();
-    } else {
-      alert('Ошибка: ' + (data.error || 'не удалось удалить объект'));
-    }
+    await apiJson(`${API_BASE}/remarks/${id}/attachments`, { method: 'POST', body: formData });
+    await openRemarkDetail(id);
+    toast('Файл приложен');
   } catch (error) {
-    if (isAuthError(error)) return;
-    alert('Ошибка подключения к серверу');
+    if (error instanceof AuthError) return;
+    toast(error.message, 'error');
   }
 }
 
-function showError(element, message) {
-  element.textContent = message;
-  element.classList.remove('hidden');
+// --- Отчёты ---
+
+async function loadReport() {
+  const params = new URLSearchParams();
+  const objectId = $('report-object').value;
+  const from = $('report-from').value;
+  const to = $('report-to').value;
+
+  if (objectId && objectId !== 'all') params.set('objectId', objectId);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+
+  const data = await apiJsonSafe(`${API_BASE}/reports/summary?${params.toString()}`);
+  if (!data) return;
+
+  const report = data.data;
+  state.report = report;
+
+  $('report-stats').innerHTML = `
+    <div class="stat-card"><div class="number">${report.total}</div><div class="label">Документов</div></div>
+    <div class="stat-card"><div class="number blue">${report.inWork}</div><div class="label">В работе</div></div>
+    <div class="stat-card"><div class="number green">${report.approved}</div><div class="label">Утверждено</div></div>
+    <div class="stat-card"><div class="number ${report.overdue ? 'red' : 'yellow'}">${report.overdue}</div><div class="label">Просрочено</div></div>
+    <div class="stat-card"><div class="number">${report.dueSoon}</div><div class="label">Срок ≤ 3 дней</div></div>
+    <div class="stat-card"><div class="number ${report.remarksOpen ? 'red' : ''}">${report.remarksOpen}</div><div class="label">Замечаний открыто</div></div>
+    <div class="stat-card"><div class="number">${report.setsComplete}/${report.setsTotal}</div><div class="label">Комплектов готово</div></div>
+    <div class="stat-card"><div class="number">${report.onTimePercent === null ? '—' : report.onTimePercent + '%'}</div><div class="label">Сдано в срок</div></div>
+  `;
+
+  $('report-status-list').innerHTML = report.byStatus.length
+    ? report.byStatus.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.status)}</td>
+          <td>${row.count}</td>
+          <td>${report.total ? Math.round((row.count / report.total) * 100) + '%' : '—'}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="3">Нет данных за выбранный период</td></tr>';
 }
 
-function escapeHtml(text) {
-  if (!text) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+function exportReport(kind) {
+  const params = new URLSearchParams();
+  const objectId = $('report-object').value;
+  if (objectId && objectId !== 'all') params.set('objectId', objectId);
+
+  const query = params.toString();
+  window.location.href = `${API_BASE}/reports/${kind}.csv${query ? '?' + query : ''}`;
 }
 
-function escapeAttr(text) {
-  return escapeHtml(String(text ?? ''))
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+// --- Уведомления ---
+
+async function refreshNotificationBadge() {
+  const data = await apiJsonSafe(`${API_BASE}/notifications/unread-count`);
+  const badge = $('notifications-badge');
+  if (!badge) return;
+
+  const unread = data ? data.unread : 0;
+  badge.textContent = String(unread);
+  badge.classList.toggle('hidden', unread === 0);
 }
 
-function formatDate(value) {
-  if (!value) return '—';
+async function openNotifications() {
+  const data = await apiJsonSafe(`${API_BASE}/notifications`);
+  if (!data) return;
 
-  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return match ? `${match[3]}.${match[2]}.${match[1]}` : String(value);
+  const items = data.data.map((item) => `
+    <div class="compact-item">
+      <div>
+        <div>${escapeHtml(item.text)}</div>
+        <div class="pto-doc-sub">${formatDateTime(item.createdAt)}</div>
+      </div>
+      ${item.read ? '' : `<button onclick="markNotificationRead(${item.id})">Прочитано</button>`}
+    </div>
+  `).join('');
+
+  openModal(`
+    <h2>Уведомления</h2>
+    ${items || '<p class="card-hint">Уведомлений нет</p>'}
+    <div class="modal-actions-row">
+      <button class="btn btn-secondary" onclick="markAllNotificationsRead()">Отметить все прочитанными</button>
+    </div>
+  `);
 }
 
-function canManageContent() {
-  return Boolean(currentUser) &&
-    (currentUser.role === 'Администратор' || currentUser.role === 'Старший монтажник');
+async function markNotificationRead(id) {
+  await apiJsonSafe(`${API_BASE}/notifications/${id}/read`, { method: 'POST' });
+  await refreshNotificationBadge();
+  await openNotifications();
 }
 
-function getRoleClass(role) {
-  switch (role) {
-    case 'Администратор': return 'admin';
-    case 'Старший монтажник': return 'senior';
-    case 'Инженер ПТО': return 'pto';
-    case 'Монтажник': return 'worker';
-    default: return '';
+async function markAllNotificationsRead() {
+  await apiJsonSafe(`${API_BASE}/notifications/read-all`, { method: 'POST' });
+  await refreshNotificationBadge();
+  closeModal();
+}
+
+// --- Профиль и смена пароля ---
+
+function openPasswordForm() {
+  openModal(`
+    <h2>Смена пароля</h2>
+    <form id="password-form" class="modal-form">
+      <div id="password-form-error" class="error-message hidden"></div>
+      <div class="form-group">
+        <label for="current-password">Текущий пароль <span class="required">*</span></label>
+        <input type="password" id="current-password" required autocomplete="current-password">
+      </div>
+      <div class="form-group">
+        <label for="new-password-field">Новый пароль <span class="required">*</span></label>
+        <input type="password" id="new-password-field" required autocomplete="new-password">
+        <span class="field-hint">Не короче 10 символов, содержит буквы и цифры, не совпадает с табельным номером.</span>
+      </div>
+      <div class="form-group">
+        <label for="new-password-repeat">Повтор нового пароля <span class="required">*</span></label>
+        <input type="password" id="new-password-repeat" required autocomplete="new-password">
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+        <button type="submit" class="btn btn-primary">Сменить пароль</button>
+      </div>
+    </form>
+  `);
+
+  $('password-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const errorEl = $('password-form-error');
+    errorEl.classList.add('hidden');
+
+    const currentPassword = $('current-password').value;
+    const newPassword = $('new-password-field').value;
+    const repeat = $('new-password-repeat').value;
+
+    if (newPassword !== repeat) {
+      showError(errorEl, 'Новые пароли не совпадают');
+      return;
+    }
+
+    try {
+      const data = await apiJson(`${API_BASE}/auth/password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+
+      if (data && data.csrfToken) state.csrfToken = data.csrfToken;
+      closeModal();
+      toast('Пароль изменён');
+    } catch (error) {
+      if (error instanceof AuthError) return;
+      showError(errorEl, error.message);
+    }
+  });
+}
+
+// --- Импорт CSV ---
+
+function openImportModal() {
+  if (!state.permissions.pto) return;
+
+  openModal(`
+    <h2>Импорт документов из CSV</h2>
+    <p class="card-hint">Колонки: Тип; Наименование; Объект; Шифр; Раздел; Статус; Срок; Ответственный; Описание. Тип можно указать кодом: ИД, ППР, АОСР, ЖР, ВК.</p>
+    <div class="form-group">
+      <input type="file" id="import-file" class="pto-file-input" accept=".csv">
+    </div>
+    <div id="import-summary" class="import-summary"></div>
+    <div id="import-preview" class="import-preview"></div>
+    <div class="modal-actions-row">
+      <button class="btn btn-secondary" type="button" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-primary" type="button" id="import-confirm" disabled>Импортировать</button>
+    </div>
+  `);
+
+  let rows = [];
+
+  $('import-file').addEventListener('change', async () => {
+    const file = $('import-file').files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const data = await apiJson(`${API_BASE}/import/preview`, { method: 'POST', body: formData });
+      rows = data.data.rows;
+
+      $('import-summary').innerHTML = `
+        <span>Всего строк: <strong>${data.data.summary.total}</strong></span>
+        <span>Готово к импорту: <strong>${data.data.summary.valid}</strong></span>
+        <span>Дубликаты: <strong>${data.data.summary.duplicates}</strong></span>
+        <span>Ошибки: <strong>${data.data.summary.invalid}</strong></span>
+      `;
+
+      $('import-preview').innerHTML = `
+        <table>
+          <thead><tr><th>#</th><th>Тип</th><th>Наименование</th><th>Объект</th><th>Срок</th><th>Проблемы</th></tr></thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr class="${row.errors.length ? 'import-row-error' : ''}">
+                <td>${row.index}</td>
+                <td>${escapeHtml(row.data.type)}</td>
+                <td>${escapeHtml(row.data.title)}</td>
+                <td>${escapeHtml(row.data.object)}</td>
+                <td>${escapeHtml(row.data.dueDate)}</td>
+                <td>${escapeHtml([...(row.errors || []), row.duplicate ? 'возможный дубликат' : ''].filter(Boolean).join('; '))}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      `;
+
+      $('import-confirm').disabled = data.data.summary.invalid > 0 || rows.length === 0;
+    } catch (error) {
+      if (error instanceof AuthError) return;
+      toast(error.message, 'error');
+    }
+  });
+
+  $('import-confirm').addEventListener('click', async () => {
+    try {
+      const data = await apiJson(`${API_BASE}/import/commit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: rows.map((row) => row.data) })
+      });
+
+      closeModal();
+      await loadPtoDocuments();
+      toast(`Импортировано: ${data.created}, пропущено дубликатов: ${data.skippedDuplicates}`);
+    } catch (error) {
+      if (error instanceof AuthError) return;
+      toast(error.message + (error.details ? ' Проверьте строки: ' + (error.details[0]?.errors || []).join(', ') : ''), 'error');
+    }
+  });
+}
+
+// --- Инициализация ---
+
+function setupEventListeners() {
+  $('login-form').addEventListener('submit', handleLogin);
+  $('logout-btn').addEventListener('click', handleLogout);
+  $('mobile-logout-btn').addEventListener('click', handleLogout);
+
+  $('toggle-password').addEventListener('click', () => {
+    const input = $('password');
+    const button = $('toggle-password');
+    if (input.type === 'password') {
+      input.type = 'text';
+      button.textContent = '✕';
+    } else {
+      input.type = 'password';
+      button.textContent = '👁️';
+    }
+  });
+
+  document.querySelectorAll('.nav-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      navigateTo(button.dataset.page);
+      closeMobileMenu();
+    });
+  });
+
+  $('nav-toggle').addEventListener('click', openMobileMenu);
+  $('mobile-menu-close').addEventListener('click', closeMobileMenu);
+  $('mobile-menu-overlay').addEventListener('click', closeMobileMenu);
+  $('notifications-btn').addEventListener('click', openNotifications);
+  $('profile-btn').addEventListener('click', openPasswordForm);
+  $('modal-close').addEventListener('click', closeModal);
+  $('article-modal').addEventListener('click', (event) => {
+    if (event.target === $('article-modal')) closeModal();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeMobileMenu();
+      closeModal();
+    }
+  });
+
+  $('search-input').addEventListener('input', (event) => {
+    state.searchQuery = event.target.value;
+    renderArticles();
+  });
+
+  $('filter-vid').addEventListener('change', (event) => {
+    state.filterVid = event.target.value;
+    renderArticles();
+  });
+
+  $('article-form').addEventListener('submit', handleAddArticle);
+  $('article-content').addEventListener('input', (event) => {
+    $('char-count').textContent = String(event.target.value.length);
+  });
+  $('article-pdf').addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    $('file-upload-text').textContent = `📄 ${file.name}`;
+    document.querySelector('.file-upload-label').classList.add('has-file');
+    $('clear-pdf').classList.remove('hidden');
+  });
+  $('clear-pdf').addEventListener('click', (event) => {
+    event.preventDefault();
+    $('article-pdf').value = '';
+    $('file-upload-text').textContent = 'Выберите PDF-файл или перетащите сюда';
+    document.querySelector('.file-upload-label').classList.remove('has-file');
+    $('clear-pdf').classList.add('hidden');
+  });
+
+  $('show-add-user').addEventListener('click', () => $('add-user-form-container').classList.toggle('hidden'));
+  $('add-user-form').addEventListener('submit', handleAddUser);
+  $('show-add-vid').addEventListener('click', () => $('add-vid-form-container').classList.toggle('hidden'));
+  $('add-vid-form').addEventListener('submit', handleAddVidRabot);
+  $('show-add-rabota').addEventListener('click', () => {
+    $('add-rabota-form-container').classList.toggle('hidden');
+    populateVidSelectForRabota();
+  });
+  $('add-rabota-form').addEventListener('submit', handleAddRabota);
+  $('filter-raboty-vid').addEventListener('change', renderRaboty);
+  $('search-raboty').addEventListener('input', renderRaboty);
+
+  // ПТО
+  $('show-add-doc').addEventListener('click', () => openPtoForm());
+  $('show-import').addEventListener('click', openImportModal);
+  $('export-pto').addEventListener('click', exportPto);
+  $('pto-filter-type').addEventListener('change', (event) => {
+    state.ptoFilters.type = event.target.value;
+    loadPtoDocuments();
+  });
+  $('pto-filter-object').addEventListener('change', (event) => {
+    state.ptoFilters.objectId = event.target.value;
+    loadPtoDocuments();
+  });
+  $('pto-filter-status').addEventListener('change', (event) => {
+    state.ptoFilters.status = event.target.value;
+    loadPtoDocuments();
+  });
+  $('pto-filter-overdue').addEventListener('change', (event) => {
+    state.ptoFilters.overdue = event.target.checked;
+    loadPtoDocuments();
+  });
+
+  let searchTimer = null;
+  $('pto-search').addEventListener('input', (event) => {
+    state.ptoFilters.q = event.target.value.trim();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadPtoDocuments, 250);
+  });
+
+  $('show-add-object').addEventListener('click', () => $('add-object-form').classList.toggle('hidden'));
+  $('add-object-form').addEventListener('submit', handleAddObject);
+
+  // Панель
+  $('dashboard-refresh').addEventListener('click', loadDashboard);
+  $('dashboard-object').addEventListener('change', loadDashboard);
+  $('global-search-btn').addEventListener('click', runGlobalSearch);
+  $('global-search').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') runGlobalSearch();
+  });
+
+  // Комплектность
+  $('show-add-set').addEventListener('click', openSetForm);
+
+  // Замечания
+  $('show-add-remark').addEventListener('click', openRemarkForm);
+  $('remarks-filter-status').addEventListener('change', (event) => {
+    state.remarkFilters.status = event.target.value;
+    loadRemarks();
+  });
+  $('remarks-filter-object').addEventListener('change', (event) => {
+    state.remarkFilters.objectId = event.target.value;
+    loadRemarks();
+  });
+  $('remarks-filter-overdue').addEventListener('change', (event) => {
+    state.remarkFilters.overdue = event.target.checked;
+    loadRemarks();
+  });
+
+  let remarkTimer = null;
+  $('remarks-search').addEventListener('input', (event) => {
+    state.remarkFilters.q = event.target.value.trim();
+    clearTimeout(remarkTimer);
+    remarkTimer = setTimeout(loadRemarks, 250);
+  });
+
+  // Отчёты
+  $('report-apply').addEventListener('click', loadReport);
+  $('report-documents-csv').addEventListener('click', () => exportReport('documents'));
+  $('report-remarks-csv').addEventListener('click', () => exportReport('remarks'));
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 768) closeMobileMenu();
+  });
+}
+
+function openMobileMenu() {
+  $('mobile-menu').classList.add('open');
+  $('mobile-menu-overlay').classList.add('open');
+  $('mobile-menu').setAttribute('aria-hidden', 'false');
+  $('nav-toggle').setAttribute('aria-expanded', 'true');
+  document.body.classList.add('menu-open');
+}
+
+function closeMobileMenu() {
+  $('mobile-menu').classList.remove('open');
+  $('mobile-menu-overlay').classList.remove('open');
+  $('mobile-menu').setAttribute('aria-hidden', 'true');
+  $('nav-toggle').setAttribute('aria-expanded', 'false');
+  document.body.classList.remove('menu-open');
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  $('current-year').textContent = String(new Date().getFullYear());
+  setupEventListeners();
+
+  const saved = sessionStorage.getItem('current_user');
+  if (!saved) return;
+
+  try {
+    state.user = JSON.parse(saved);
+  } catch {
+    sessionStorage.removeItem('current_user');
+    return;
   }
-}
 
-function getRoleIcon(role) {
-  switch (role) {
-    case 'Администратор': return '';
-    case 'Старший монтажник': return '';
-    case 'Инженер ПТО': return '';
-    case 'Монтажник': return '';
-    default: return '';
+  const session = await apiJsonSafe(`${API_BASE}/auth/session`);
+  if (!session) {
+    forceLogin(null);
+    return;
   }
-}
+
+  state.user = session.user;
+  state.csrfToken = session.csrfToken;
+  state.permissions = session.permissions;
+  await showApp();
+});

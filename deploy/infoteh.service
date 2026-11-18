@@ -1,0 +1,43 @@
+# systemd-юнит для приложения «База знаний и ПТО».
+# Установка:
+#   sudo cp deploy/infoteh.service /etc/systemd/system/infoteh.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now infoteh
+
+[Unit]
+Description=Infoteh knowledge base and PTO registry
+Documentation=file:///opt/infoteh/DEPLOYMENT_RU_VPS.md
+After=network.target
+
+[Service]
+Type=simple
+User=infoteh
+Group=infoteh
+WorkingDirectory=/opt/infoteh
+
+# Переменные берутся из /opt/infoteh/.env самим приложением (config.js),
+# NODE_ENV задаётся явно, чтобы исключитьdevelopment-режим по умолчанию.
+Environment=NODE_ENV=production
+EnvironmentFile=-/opt/infoteh/.env
+
+# Укажите путь к используемой версии Node.js (см. .nvmrc и DEPLOYMENT_RU_VPS.md)
+ExecStart=/usr/bin/node /opt/infoteh/server.js
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+# Ограничения безопасности
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/infoteh/uploads /opt/infoteh/backups /opt/infoteh/logs
+UMask=0077
+
+# Логи — в journald и logs/app.log
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

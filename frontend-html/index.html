@@ -58,8 +58,12 @@
       </div>
 
       <nav class="mobile-nav" aria-label="Мобильная навигация">
-        <button class="nav-btn active" data-page="catalog">Каталог инструкций</button>
+        <button class="nav-btn active" data-page="dashboard">Панель ПТО</button>
         <button class="nav-btn" data-page="pto">Документы ПТО</button>
+        <button class="nav-btn" data-page="completeness">Комплектность</button>
+        <button class="nav-btn" data-page="remarks">Замечания</button>
+        <button class="nav-btn" data-page="reports">Отчёты</button>
+        <button class="nav-btn" data-page="catalog">Каталог знаний</button>
         <button class="nav-btn hidden" data-page="add-article">Добавить инструкцию</button>
         <button class="nav-btn hidden" data-page="vidy-rabot">Виды работ</button>
         <button class="nav-btn hidden" data-page="raboty">Работы</button>
@@ -76,8 +80,12 @@
         </div>
         
         <nav class="nav" id="main-nav" aria-label="Основная навигация">
-          <button class="nav-btn active" data-page="catalog">Каталог инструкций</button>
+          <button class="nav-btn active" data-page="dashboard" id="nav-dashboard">Панель ПТО</button>
           <button class="nav-btn" data-page="pto" id="nav-pto">Документы ПТО</button>
+          <button class="nav-btn" data-page="completeness" id="nav-completeness">Комплектность</button>
+          <button class="nav-btn" data-page="remarks" id="nav-remarks">Замечания</button>
+          <button class="nav-btn" data-page="reports" id="nav-reports">Отчёты</button>
+          <button class="nav-btn" data-page="catalog" id="nav-catalog">Каталог знаний</button>
           <button class="nav-btn hidden" data-page="add-article" id="nav-add-article">Добавить инструкцию</button>
           <button class="nav-btn hidden" data-page="vidy-rabot" id="nav-vidy-rabot">Виды работ</button>
           <button class="nav-btn hidden" data-page="raboty" id="nav-raboty">Работы</button>
@@ -89,6 +97,11 @@
             <span id="user-name" class="user-name"></span>
             <span id="user-role" class="user-role"></span>
           </div>
+          <button id="notifications-btn" class="header-icon-btn" title="Уведомления" aria-label="Уведомления">
+            <span aria-hidden="true">🔔</span>
+            <span id="notifications-badge" class="notification-badge hidden">0</span>
+          </button>
+          <button id="profile-btn" class="header-icon-btn" title="Профиль и смена пароля" aria-label="Профиль">⚙</button>
           <button id="logout-btn" class="btn-logout" title="Выйти">Выйти</button>
         </div>
 
@@ -102,7 +115,7 @@
 
     <main class="main-content">
       
-      <section id="catalog-page" class="content-section">
+      <section id="catalog-page" class="content-section hidden">
         <div class="section-header">
           <h1>Каталог инструкций, ГОСТов, решений</h1>
           <p>Инструкции по монтажным и ремонтным работам</p>
@@ -128,6 +141,7 @@
             </div>
             <div class="section-actions">
               <button id="show-add-doc" class="btn btn-primary hidden">Добавить документ</button>
+              <button id="show-import" class="btn btn-light hidden">Импорт CSV</button>
               <button id="export-pto" class="btn btn-light">Выгрузить реестр</button>
             </div>
           </div>
@@ -474,6 +488,151 @@
               <li class="allowed">✓ Управление сотрудниками</li>
             </ul>
           </div>
+        </div>
+      </section>
+
+      <section id="dashboard-page" class="content-section hidden">
+        <div class="section-header">
+          <div class="section-header-row">
+            <div>
+              <h1>Панель ПТО</h1>
+              <p>Сводка по документации, срокам и замечаниям. Показатели считаются по фактическим данным.</p>
+            </div>
+            <div class="section-actions">
+              <select id="dashboard-object" class="filter-select" aria-label="Объект для панели"></select>
+              <button id="dashboard-refresh" class="btn btn-light" type="button">Обновить</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats" id="dashboard-stats"></div>
+
+        <div class="dashboard-grid">
+          <div class="card">
+            <h3>Просроченные документы</h3>
+            <div id="dashboard-overdue" class="compact-list"></div>
+          </div>
+          <div class="card">
+            <h3>Незакрытые замечания</h3>
+            <div id="dashboard-remarks" class="compact-list"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Поиск по базе знаний и документам</h3>
+          <div class="filters">
+            <input type="text" id="global-search" class="search-input" placeholder="Название, шифр, текст документа или инструкции">
+            <button id="global-search-btn" class="btn btn-primary" type="button">Найти</button>
+          </div>
+          <div id="global-search-results" class="search-results"></div>
+        </div>
+      </section>
+
+      <section id="completeness-page" class="content-section hidden">
+        <div class="section-header">
+          <div class="section-header-row">
+            <div>
+              <h1>Комплектность ИД</h1>
+              <p>Комплекты исполнительной документации по объектам и контроль отсутствующих позиций</p>
+            </div>
+            <button id="show-add-set" class="btn btn-primary hidden" type="button">Создать комплект</button>
+          </div>
+        </div>
+
+        <div id="completeness-list" class="cards-list"></div>
+
+        <div id="completeness-empty" class="empty-state hidden">
+          <h3>Комплекты не созданы</h3>
+          <p>Создайте комплект ИД и добавьте состав по требованиям заказчика</p>
+        </div>
+      </section>
+
+      <section id="remarks-page" class="content-section hidden">
+        <div class="section-header">
+          <div class="section-header-row">
+            <div>
+              <h1>Замечания и предписания</h1>
+              <p>Регистрация замечаний, сроки устранения и контроль статусов</p>
+            </div>
+            <button id="show-add-remark" class="btn btn-primary hidden" type="button">Добавить замечание</button>
+          </div>
+        </div>
+
+        <div class="stats" id="remarks-stats"></div>
+
+        <div class="filters">
+          <select id="remarks-filter-status" class="filter-select" aria-label="Статус замечания"></select>
+          <select id="remarks-filter-object" class="filter-select" aria-label="Объект"></select>
+          <input type="text" id="remarks-search" class="search-input" placeholder="Поиск: номер, описание, ответственный">
+          <label class="pto-toggle">
+            <input type="checkbox" id="remarks-filter-overdue">
+            <span>Только просроченные</span>
+          </label>
+        </div>
+
+        <div class="table-container table-container-scroll">
+          <table class="data-table remarks-table">
+            <thead>
+              <tr>
+                <th>Номер</th>
+                <th>Дата</th>
+                <th>Объект</th>
+                <th>Замечание</th>
+                <th>Ответственный</th>
+                <th>Срок</th>
+                <th>Статус</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="remarks-list"></tbody>
+          </table>
+        </div>
+
+        <div id="remarks-empty" class="empty-state hidden">
+          <h3>Замечаний нет</h3>
+          <p>Добавьте замечание или измените фильтры</p>
+        </div>
+      </section>
+
+      <section id="reports-page" class="content-section hidden">
+        <div class="section-header">
+          <div class="section-header-row">
+            <div>
+              <h1>Отчёты ПТО</h1>
+              <p>Сводка по документам, срокам, комплектности и замечаниям</p>
+            </div>
+            <div class="section-actions">
+              <select id="report-object" class="filter-select" aria-label="Объект отчёта"></select>
+              <input type="date" id="report-from" class="filter-select" aria-label="Дата с">
+              <input type="date" id="report-to" class="filter-select" aria-label="Дата по">
+              <button id="report-apply" class="btn btn-primary" type="button">Показать</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats" id="report-stats"></div>
+
+        <div class="card">
+          <div class="section-header-row">
+            <h3>Распределение документов по статусам</h3>
+            <div class="section-actions">
+              <button id="report-documents-csv" class="btn btn-light btn-sm" type="button">Документы (CSV)</button>
+              <button id="report-remarks-csv" class="btn btn-light btn-sm" type="button">Замечания (CSV)</button>
+            </div>
+          </div>
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr><th>Статус</th><th>Количество</th><th>Доля</th></tr>
+              </thead>
+              <tbody id="report-status-list"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Экспорт отчётов</h3>
+          <p class="card-hint">Выгрузки содержат только доступные вам объекты и формируются по текущим фильтрам.</p>
         </div>
       </section>
     </main>

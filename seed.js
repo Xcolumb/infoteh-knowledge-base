@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
+import { openDatabase } from './lib/db.js';
 import bcrypt from 'bcryptjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,55 +21,9 @@ if (fs.existsSync(dbPath) && force) {
   console.log('Старая база удалена.');
 }
 
-const db = new Database(dbPath);
-db.pragma('foreign_keys = ON');
-
-db.exec(`
-  CREATE TABLE "Сотрудник" (
-    "ID_сотрудника" INTEGER PRIMARY KEY AUTOINCREMENT,
-    "Табельный_номер" TEXT NOT NULL UNIQUE,
-    "Пароль" TEXT NOT NULL,
-    "ФИО" TEXT NOT NULL,
-    "Должность" TEXT NOT NULL
-  );
-
-  CREATE TABLE "Виды_работ" (
-    "ID_вида" INTEGER PRIMARY KEY AUTOINCREMENT,
-    "Название" TEXT NOT NULL UNIQUE,
-    "updated_at" DATETIME NOT NULL
-  );
-
-  CREATE TABLE "Работа" (
-    "ID_работы" INTEGER PRIMARY KEY AUTOINCREMENT,
-    "Название" TEXT NOT NULL,
-    "ID_вида" INTEGER NOT NULL,
-    "Описание" TEXT,
-    "Инструкция" TEXT,
-    "updated_at" DATETIME NOT NULL,
-    FOREIGN KEY ("ID_вида") REFERENCES "Виды_работ"("ID_вида")
-      ON DELETE RESTRICT ON UPDATE CASCADE
-  );
-
-  CREATE TABLE "Статья" (
-    "ID_статьи" INTEGER PRIMARY KEY AUTOINCREMENT,
-    "Название" TEXT NOT NULL,
-    "ID_работы" INTEGER NOT NULL,
-    "Ключевые_слова" TEXT,
-    "Дата_публикации" TEXT NOT NULL,
-    "ID_автора" INTEGER NOT NULL,
-    "Текст_статьи" TEXT NOT NULL,
-    "Файл" TEXT,
-    "updated_at" DATETIME NOT NULL,
-    FOREIGN KEY ("ID_работы") REFERENCES "Работа"("ID_работы")
-      ON DELETE RESTRICT ON UPDATE CASCADE,
-    FOREIGN KEY ("ID_автора") REFERENCES "Сотрудник"("ID_сотрудника")
-      ON DELETE RESTRICT ON UPDATE CASCADE
-  );
-
-  CREATE INDEX idx_Работа_ID_вида ON "Работа"("ID_вида");
-  CREATE INDEX idx_Статья_ID_работы ON "Статья"("ID_работы");
-  CREATE INDEX idx_Статья_ID_автора ON "Статья"("ID_автора");
-`);
+// Схема БД создаётся централизованно миграциями (lib/migrations),
+// поэтому дублировать DDL в seed-скрипте больше не нужно.
+const db = openDatabase({ file: dbPath });
 
 const pad = (value) => String(value).padStart(2, '0');
 

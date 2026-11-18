@@ -13,3 +13,8 @@ uploads/*
 .DS_Store
 Thumbs.db
 *.log
+
+# Конфигурация с секретами и рабочие каталоги
+.env
+backups/
+logs/

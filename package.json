@@ -1,16 +1,21 @@
 {
   "name": "infoteh-balakovo-knowledge-base",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "База знаний для монтажников и ПТО ООО «ИНФОТЕХ БАЛАКОВО»",
+  "description": "База знаний и реестр ПТО ООО «ИНФОТЕХ БАЛАКОВО»",
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "dev": "node --watch server.js",
     "seed": "node seed.js",
     "generate-pdfs": "node generate-pdfs.js",
     "hash-passwords": "node hash-passwords.js",
-    "migrate": "node migrate-updated-at.js",
-    "migrate-pto": "node migrate-pto.js"
+    "migrate": "node scripts/migrate.js",
+    "migrate-legacy": "node migrate-updated-at.js",
+    "migrate-pto": "node migrate-pto.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
+    "test": "node --test tests/"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -21,7 +26,7 @@
     "multer": "^2.1.1"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20 <27"
   },
   "allowScripts": {
     "better-sqlite3": true

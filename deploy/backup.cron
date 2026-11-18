@@ -1,0 +1,10 @@
+# Пример расписания резервного копирования (crontab пользователя infoteh).
+# Установка: sudo -u infoteh crontab -e
+# Проверка:  sudo -u infoteh crontab -l
+
+# Ежедневно в 02:30 — копия БД и файлов с проверкой контрольных сумм
+30 2 * * * cd /opt/infoteh && /usr/bin/node scripts/backup.js >> logs/backup.log 2>&1
+
+# Раз в квартал проверяйте восстановление вручную:
+#   node scripts/restore.js backups/backup-XXXX --force
+# на тестовой копии проекта или отдельном стенде.

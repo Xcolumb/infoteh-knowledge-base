@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
+import { openDatabase } from './lib/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,64 +14,9 @@ if (!fs.existsSync(dbPath)) {
   process.exit(1);
 }
 
-const db = new Database(dbPath);
-db.pragma('foreign_keys = ON');
-
-console.log('Миграция базы под модуль ПТО');
-console.log(`Путь к БД: ${dbPath}`);
-console.log('');
-
-// Схема модуля ПТО. Все операции идемпотентны: повторный запуск безопасен.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS "Объект" (
-    "ID_объекта" INTEGER PRIMARY KEY AUTOINCREMENT,
-    "Название" TEXT NOT NULL UNIQUE,
-    "Адрес" TEXT,
-    "Заказчик" TEXT,
-    "updated_at" DATETIME NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS "Документ_ПТО" (
-    "ID_документа" INTEGER PRIMARY KEY AUTOINCREMENT,
-    "Тип" TEXT NOT NULL,
-    "Название" TEXT NOT NULL,
-    "ID_объекта" INTEGER,
-    "Шифр" TEXT,
-    "Раздел_проекта" TEXT,
-    "Статус" TEXT NOT NULL DEFAULT 'Черновик',
-    "Срок" TEXT,
-    "Ответственный" TEXT,
-    "Текст" TEXT,
-    "Файл" TEXT,
-    "ID_автора" INTEGER,
-    "Версия" INTEGER NOT NULL DEFAULT 1,
-    "Актуализирован" TEXT NOT NULL,
-    "updated_at" DATETIME NOT NULL,
-    FOREIGN KEY ("ID_объекта") REFERENCES "Объект"("ID_объекта")
-      ON DELETE SET NULL ON UPDATE CASCADE,
-    FOREIGN KEY ("ID_автора") REFERENCES "Сотрудник"("ID_сотрудника")
-      ON DELETE SET NULL ON UPDATE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS "История_ПТО" (
-    "ID_записи" INTEGER PRIMARY KEY AUTOINCREMENT,
-    "ID_документа" INTEGER NOT NULL,
-    "Дата" DATETIME NOT NULL,
-    "Автор" TEXT,
-    "Действие" TEXT NOT NULL,
-    "Статус_был" TEXT,
-    "Статус_стал" TEXT,
-    "Версия" INTEGER,
-    "Комментарий" TEXT,
-    FOREIGN KEY ("ID_документа") REFERENCES "Документ_ПТО"("ID_документа")
-      ON DELETE CASCADE ON UPDATE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_Документ_ПТО_объект ON "Документ_ПТО"("ID_объекта");
-  CREATE INDEX IF NOT EXISTS idx_Документ_ПТО_тип ON "Документ_ПТО"("Тип");
-  CREATE INDEX IF NOT EXISTS idx_Документ_ПТО_статус ON "Документ_ПТО"("Статус");
-  CREATE INDEX IF NOT EXISTS idx_История_ПТО_документ ON "История_ПТО"("ID_документа");
-`);
+// Схема модуля ПТО создаётся централизованными миграциями (lib/migrations/index.js),
+// скрипт только добавляет демонстрационные данные.
+const db = openDatabase({ file: dbPath });
 
 const pad = (value) => String(value).padStart(2, '0');
 
@@ -98,15 +43,20 @@ if (ptoExists) {
   ptoUserId = ptoExists.ID_сотрудника;
   console.log(`Сотрудник ${ptoTabNumber} уже существует (ID ${ptoUserId})`);
 } else {
+  // Пароль демонстрационной учётной записи задаётся переменной окружения,
+  // значение по умолчанию используется только для локального демо.
+  const demoPassword = process.env.SEED_PTO_PASSWORD || 'pto123';
   const result = db
     .prepare(`
-      INSERT INTO "Сотрудник" ("Табельный_номер", "Пароль", "ФИО", "Должность")
-      VALUES (?, ?, ?, ?)
+      INSERT INTO "Сотрудник" ("Табельный_номер", "Пароль", "ФИО", "Должность", "Демо")
+      VALUES (?, ?, ?, ?, 1)
     `)
-    .run(ptoTabNumber, bcrypt.hashSync('pto123', 10), 'Соколов Дмитрий Андреевич', 'Инженер ПТО');
+    .run(ptoTabNumber, bcrypt.hashSync(demoPassword, 10), 'Соколов Дмитрий Андреевич', 'Инженер ПТО');
   ptoUserId = result.lastInsertRowid;
-  console.log(`Добавлен сотрудник ПТО: Соколов Дмитрий Андреевич (${ptoTabNumber} / pto123)`);
+  console.log(`Добавлен сотрудник ПТО (${ptoTabNumber}), пароль — из SEED_PTO_PASSWORD или демо-значение`);
 }
+
+db.prepare('UPDATE "Сотрудник" SET "Демо" = 1 WHERE "Табельный_номер" = ?').run(ptoTabNumber);
 
 const admin = db.prepare('SELECT "ID_сотрудника" FROM "Сотрудник" WHERE "Должность" = ?').get('Администратор');
 const adminId = admin ? admin.ID_сотрудника : ptoUserId;
