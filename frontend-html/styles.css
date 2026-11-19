@@ -2683,3 +2683,19 @@ body.modal-open {
     gap: 8px;
   }
 }
+/* Имя файла в тёмной карточке документа и вложениях замечаний */
+.pto-detail .file-name,
+.pto-detail .attachment-item .file-name {
+  color: #CBD5E1;
+}
+/* Кнопки в тёмных блоках редакций и вложений должны читаться */
+.revision-item .action-btn,
+.attachment-item .action-btn {
+  color: #1f2937;
+  text-decoration: none;
+}
+
+.revision-item .action-btn:hover,
+.attachment-item .action-btn:hover {
+  color: #111827;
+}
