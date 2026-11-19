@@ -1153,12 +1153,15 @@ async function openPtoDoc(id) {
   const revisionsHtml = (doc.revisions || []).length
     ? `<div class="revision-list">${doc.revisions.map((revision) => `
         <div class="revision-item">
-          <div>
-            <strong>ред. ${revision.version}</strong>
-            ${revision.originalName ? ` · ${escapeHtml(revision.originalName)}` : ''}
+          <div class="revision-main">
+            <strong>ред. ${revision.version}${Number(revision.version) === Number(doc.version) ? ' · текущая' : ''}</strong>
+            ${revision.originalName ? `<div class="file-name" title="${escapeAttr(revision.originalName)}">${escapeHtml(revision.originalName)}</div>` : ''}
             <div class="pto-history-meta">${formatDateTime(revision.createdAt)} · ${escapeHtml(revision.author || '—')}${revision.comment ? ` · ${escapeHtml(revision.comment)}` : ''}</div>
           </div>
-          ${revision.file ? `<a href="${escapeAttr(revision.file)}" target="_blank" rel="noopener">Скачать</a>` : '<span class="pto-history-meta">без файла</span>'}
+          ${revision.file ? `<div class="revision-actions">
+            <button type="button" class="action-btn edit" onclick="openPreview('revision', ${revision.id})">Просмотреть</button>
+            <a class="action-btn" href="${escapeAttr(revision.file)}?disposition=attachment">Скачать</a>
+          </div>` : '<span class="pto-history-meta">без файла</span>'}
         </div>`).join('')}</div>`
     : '<p class="card-hint">Редакции не загружались</p>';
 
@@ -1202,9 +1205,12 @@ async function openPtoDoc(id) {
 
       ${doc.content ? `<div class="pto-detail-text">${escapeHtml(doc.content)}</div>` : ''}
 
-      ${doc.file ? `<div class="pdf-actions">
-        <a href="${escapeAttr(doc.file)}" target="_blank" rel="noopener" class="pdf-download-btn">📄 Открыть файл</a>
-        <a href="${escapeAttr(doc.file)}" download class="pdf-download-btn">Скачать${doc.originalName ? ' · ' + escapeHtml(doc.originalName) : ''}</a>
+      ${doc.file ? `<div class="document-file-block">
+        ${doc.originalName ? `<div class="file-name" title="${escapeAttr(doc.originalName)}">${escapeHtml(doc.originalName)}</div>` : ''}
+        <div class="pdf-actions">
+          <button type="button" class="pdf-download-btn" onclick="openPreview('document', ${doc.id})">👁 Просмотреть</button>
+          <a href="${escapeAttr(doc.file)}?disposition=attachment" class="pdf-download-btn" download>Скачать оригинал</a>
+        </div>
       </div>` : ''}
 
       ${canManage ? `
@@ -1915,9 +1921,12 @@ async function openRemarkDetail(id) {
     </div>`).join('');
 
   const attachments = (remark.attachments || []).map((file) => `
-    <div class="compact-item">
-      <a href="${escapeAttr(file.file)}" target="_blank" rel="noopener">${escapeHtml(file.originalName || 'Файл')}</a>
-      <span class="compact-date">${formatDate(file.createdAt)}</span>
+    <div class="compact-item attachment-item">
+      <span class="file-name" title="${escapeAttr(file.originalName || 'Файл')}">${escapeHtml(file.originalName || 'Файл')}</span>
+      <span class="attachment-actions">
+        <button type="button" class="action-btn edit" onclick="openPreview('remark', ${file.id})">Просмотреть</button>
+        <a class="action-btn" href="${escapeAttr(file.file)}?disposition=attachment">Скачать</a>
+      </span>
     </div>`).join('');
 
   const history = (remark.history || []).map((entry) => `
@@ -2270,6 +2279,153 @@ function openImportModal() {
   });
 }
 
+// --- Просмотр документов (PDF, DOCX, XLSX, TXT/CSV, изображения) ---
+
+const viewer = {
+  modal: null,
+  body: null,
+  title: null,
+  subtitle: null,
+  download: null
+};
+
+function initViewerRefs() {
+  viewer.modal = $('viewer-modal');
+  viewer.body = $('viewer-body');
+  viewer.title = $('viewer-title');
+  viewer.subtitle = $('viewer-subtitle');
+  viewer.download = $('viewer-download');
+}
+
+function closeViewer() {
+  if (!viewer.modal) return;
+  viewer.modal.classList.add('hidden');
+  viewer.body.innerHTML = '';
+  document.body.classList.remove('modal-open');
+}
+
+function viewerSubtitle(meta) {
+  const parts = [];
+  if (meta.version) parts.push(`редакция ${meta.version}`);
+  if (meta.isCurrent === false) parts.push('не актуальная редакция');
+  if (meta.size) parts.push(`${(Number(meta.size) / 1024).toFixed(1)} КБ`);
+  if (meta.name) parts.push(meta.name);
+  return parts.map((part) => `<span>${escapeHtml(part)}</span>`).join(' · ');
+}
+
+function viewerWarnings(warnings) {
+  if (!warnings || !warnings.length) return '';
+  return `<div class="viewer-warning">${warnings.map((warning) => escapeHtml(warning)).join('<br>')}</div>`;
+}
+
+async function openPreview(entity, id) {
+  const metaResponse = await apiJsonSafe(`${API_BASE}/preview/${entity}/${id}`);
+  if (!metaResponse) return;
+  showViewer(metaResponse.data, entity, id);
+}
+
+async function showViewer(meta, entity, id) {
+  if (!viewer.modal) initViewerRefs();
+
+  viewer.title.textContent = meta.title || meta.name || 'Просмотр документа';
+  viewer.subtitle.innerHTML = viewerSubtitle(meta);
+  viewer.download.href = meta.downloadUrl || '#';
+  viewer.body.innerHTML = '<div class="viewer-loading">Загрузка документа…</div>';
+  viewer.modal.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+
+  const noteHtml = (meta.notes || []).length
+    ? `<div class="viewer-note">${meta.notes.map((note) => escapeHtml(note)).join('<br>')}</div>`
+    : '';
+
+  try {
+    switch (meta.mode) {
+      case 'iframe': {
+        if (meta.kind === 'image') {
+          viewer.body.innerHTML = `<div class="viewer-image-wrap"><img class="viewer-image" src="${escapeAttr(meta.inlineUrl)}" alt="${escapeAttr(meta.name)}"></div>`;
+        } else {
+          viewer.body.innerHTML = `<iframe class="viewer-frame" src="${escapeAttr(meta.inlineUrl)}" title="${escapeAttr(meta.name)}"></iframe>`;
+        }
+        break;
+      }
+
+      case 'converted': {
+        viewer.body.innerHTML = `<iframe class="viewer-frame" src="${escapeAttr(meta.pdfUrl)}" title="${escapeAttr(meta.name)}"></iframe>`;
+        break;
+      }
+
+      case 'html': {
+        const content = await apiJsonSafe(`${API_BASE}/preview/${entity}/${id}/content`);
+        if (!content) return;
+        viewer.body.innerHTML = `${viewerWarnings(content.data.warnings)}<div class="docx-view">${content.data.html}</div>`;
+        break;
+      }
+
+      case 'table': {
+        const content = await apiJsonSafe(`${API_BASE}/preview/${entity}/${id}/content`);
+        if (!content) return;
+
+        if (content.data.kind === 'xlsx') {
+          const sheets = content.data.sheets || [];
+          const tabs = sheets.map((sheet, index) => `<button type="button" class="sheet-tab ${index === 0 ? 'active' : ''}" data-index="${index}">${escapeHtml(sheet.name)}</button>`).join('');
+          const first = sheets[0];
+          viewer.body.innerHTML = `
+            ${viewerWarnings(content.data.warnings)}
+            <div class="sheet-tabs">${tabs || '<span class="card-hint">В книге нет листов</span>'}</div>
+            <div class="sheet-area" id="sheet-area">${first ? renderSheetTable(first) : ''}</div>
+          `;
+
+          viewer.body.querySelectorAll('.sheet-tab').forEach((button) => {
+            button.addEventListener('click', () => {
+              viewer.body.querySelectorAll('.sheet-tab').forEach((item) => item.classList.toggle('active', item === button));
+              $('sheet-area').innerHTML = renderSheetTable(sheets[Number(button.dataset.index)]);
+            });
+          });
+        } else {
+          viewer.body.innerHTML = `
+            ${viewerWarnings([])}
+            <div class="sheet-area">${renderRowsTable(content.data.rows)}</div>
+          `;
+        }
+        break;
+      }
+
+      case 'text': {
+        const content = await apiJsonSafe(`${API_BASE}/preview/${entity}/${id}/content`);
+        if (!content) return;
+        viewer.body.innerHTML = `<pre class="viewer-text">${escapeHtml(content.data.text)}</pre>`;
+        break;
+      }
+
+      default: {
+        viewer.body.innerHTML = `<div class="viewer-empty">
+          ${noteHtml || '<p>Предварительный просмотр этого формата недоступен. Скачайте файл для открытия в соответствующей программе.</p>'}
+          <a class="btn btn-primary" href="${escapeAttr(meta.downloadUrl || '#')}">Скачать файл</a>
+        </div>`;
+      }
+    }
+  } catch (error) {
+    if (error instanceof AuthError) return;
+    viewer.body.innerHTML = `<div class="viewer-empty">Не удалось открыть документ: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderSheetTable(sheet) {
+  if (!sheet || !sheet.rows || !sheet.rows.length) {
+    return '<p class="card-hint">Лист пуст или не содержит данных</p>';
+  }
+
+  const rows = sheet.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('');
+  return `<table class="sheet-table"><tbody>${rows}</tbody></table>`;
+}
+
+function renderRowsTable(rows) {
+  if (!rows || !rows.length) return '<p class="card-hint">Нет данных для отображения</p>';
+  const body = rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('');
+  return `<table class="sheet-table"><tbody>${body}</tbody></table>`;
+}
+
+
 // --- Инициализация ---
 
 function setupEventListeners() {
@@ -2306,9 +2462,18 @@ function setupEventListeners() {
     if (event.target === $('article-modal')) closeModal();
   });
 
+  $('viewer-close').addEventListener('click', closeViewer);
+  $('viewer-modal').addEventListener('click', (event) => {
+    if (event.target === $('viewer-modal')) closeViewer();
+  });
+
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       closeMobileMenu();
+      if (!document.getElementById('viewer-modal').classList.contains('hidden')) {
+        closeViewer();
+        return;
+      }
       closeModal();
     }
   });

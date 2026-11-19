@@ -2354,3 +2354,332 @@ body.modal-open {
     justify-content: flex-start;
   }
 }
+
+/* ==========================================================================
+   Брендинг «Информационная система ПТО» и просмотр документов
+   ========================================================================== */
+
+.login-header h1 {
+  font-size: 22px;
+  line-height: 1.2;
+  text-transform: none;
+  letter-spacing: -0.015em;
+}
+
+.login-subtitle {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #475569;
+  overflow-wrap: anywhere;
+}
+
+.login-org {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  letter-spacing: 0.04em;
+}
+
+.footer-org {
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.78);
+  overflow-wrap: anywhere;
+}
+
+/* Просмотр документов */
+
+#viewer-modal {
+  z-index: 1200;
+  padding: 12px;
+}
+
+.viewer-content {
+  display: flex;
+  flex-direction: column;
+  width: min(1200px, 98vw);
+  height: min(92vh, 940px);
+  background: #fff;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.viewer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #E8E9EB;
+  background: #fff;
+}
+
+.viewer-title-block {
+  min-width: 0;
+}
+
+.viewer-title-block h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #1f2937;
+  overflow-wrap: anywhere;
+}
+
+.viewer-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+
+.viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.viewer-close {
+  position: static;
+}
+
+.viewer-body {
+  position: relative;
+  flex: 1;
+  overflow: auto;
+  background: #F4F5F7;
+}
+
+.viewer-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.viewer-image-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px;
+}
+
+.viewer-image {
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+
+.viewer-warning {
+  padding: 10px 16px;
+  background: #FEF3C7;
+  color: #92400E;
+  font-size: 13px;
+}
+
+.viewer-note {
+  padding: 10px 16px;
+  background: #EFF6FF;
+  color: #1D4ED8;
+  font-size: 13px;
+}
+
+.viewer-loading {
+  padding: 40px;
+  text-align: center;
+  color: #64748b;
+}
+
+.viewer-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 24px;
+  text-align: center;
+  color: #475569;
+}
+
+.viewer-text {
+  margin: 0;
+  padding: 20px 24px;
+  background: #fff;
+  min-height: 100%;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #1f2937;
+}
+
+/* DOCX → HTML */
+
+.docx-view {
+  max-width: 900px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 36px 52px;
+  background: #fff;
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.docx-view h1,
+.docx-view h2,
+.docx-view h3,
+.docx-view h4 {
+  margin: 20px 0 10px;
+  color: #111827;
+  line-height: 1.25;
+}
+
+.docx-view p {
+  margin: 6px 0;
+}
+
+.docx-view table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.docx-view td {
+  border: 1px solid #D7DBE0;
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.docx-view ul.docx-list {
+  margin: 6px 0;
+  padding-left: 24px;
+}
+
+.docx-view .docx-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 10px 0;
+}
+
+/* XLSX / CSV */
+
+.sheet-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 10px 12px;
+  background: #fff;
+  border-bottom: 1px solid #E8E9EB;
+}
+
+.sheet-tab {
+  padding: 6px 12px;
+  border: 1px solid #D7DBE0;
+  border-radius: 8px;
+  background: #F8F9FA;
+  color: #334155;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sheet-tab.active {
+  background: #27A73A;
+  border-color: #27A73A;
+  color: #fff;
+}
+
+.sheet-area {
+  overflow: auto;
+  background: #fff;
+}
+
+.sheet-table {
+  min-width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 12.5px;
+}
+
+.sheet-table td {
+  min-width: 60px;
+  padding: 4px 8px;
+  border: 1px solid #E3E6EA;
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #1f2937;
+}
+
+/* Длинные имена файлов */
+
+.file-name {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #334155;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.document-file-block {
+  margin-top: 14px;
+}
+
+.revision-item {
+  align-items: flex-start;
+}
+
+.revision-main {
+  min-width: 0;
+}
+
+.revision-actions,
+.attachment-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.attachment-item {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  #viewer-modal {
+    padding: 0;
+  }
+
+  .viewer-content {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .viewer-header {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .viewer-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .docx-view {
+    padding: 20px 16px;
+  }
+
+  .revision-item,
+  .attachment-item {
+    flex-direction: column;
+    gap: 8px;
+  }
+}

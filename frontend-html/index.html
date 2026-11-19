@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ООО «ИНФОТЕХ БАЛАКОВО» — База знаний для монтажников</title>
+  <title>Информационная система ПТО — ООО «ИНФОТЕХ БАЛАКОВО»</title>
   <link rel="icon" type="image/x-icon" href="img/favico.png">
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,8 +17,9 @@
         <div class="logo">
           <img src="img/logo.png" alt="Логотип">
         </div>
-        <h1>ООО «ИНФОТЕХ БАЛАКОВО»</h1>
-        <p>База знаний для монтажников</p>
+        <h1>Информационная система ПТО</h1>
+        <p class="login-subtitle">Документы · Комплектность ИД · Замечания · База знаний</p>
+        <p class="login-org">ООО «ИНФОТЕХ БАЛАКОВО»</p>
       </div>
       
       <form id="login-form" class="login-form">
@@ -638,8 +639,25 @@
     </main>
 
     <footer class="footer">
-      <p>ООО «ИНФОТЕХ БАЛАКОВО» — База знаний для монтажников © <span id="current-year"></span></p>
+      <p><strong>Информационная система ПТО</strong> — Цифровые инструменты производственно-технического отдела © <span id="current-year"></span></p>
+      <p class="footer-org">ООО «ИНФОТЕХ БАЛАКОВО» · пилотное внедрение: ООО «СтройМонтажГрупп», объект «Региональный ЦОД в г. Балаково»</p>
     </footer>
+  </div>
+
+  <div id="viewer-modal" class="modal hidden">
+    <div class="viewer-content">
+      <div class="viewer-header">
+        <div class="viewer-title-block">
+          <h3 id="viewer-title">Просмотр документа</h3>
+          <div id="viewer-subtitle" class="viewer-subtitle"></div>
+        </div>
+        <div class="viewer-actions">
+          <a id="viewer-download" class="btn btn-light btn-sm" href="#" download>Скачать оригинал</a>
+          <button class="modal-close viewer-close" id="viewer-close" type="button" aria-label="Закрыть просмотр">✕</button>
+        </div>
+      </div>
+      <div id="viewer-body" class="viewer-body"></div>
+    </div>
   </div>
 
   <div id="article-modal" class="modal hidden">

@@ -13,6 +13,7 @@ import { createStaffRouter } from './routes/staff.js';
 import { createCatalogRouter } from './routes/catalog.js';
 import { createPtoRouter } from './routes/pto.js';
 import { createFilesRouter } from './routes/files.js';
+import { createPreviewRouter } from './routes/preview.js';
 import { createCompletenessRouter } from './routes/completeness.js';
 import { createRemarksRouter } from './routes/remarks.js';
 import { createNotificationsRouter } from './routes/notifications.js';
@@ -71,6 +72,7 @@ export function createApp({ db = openDatabase(), cfg = config } = {}) {
   app.use('/api', createCatalogRouter({ db }));
   app.use('/api', createPtoRouter({ db }));
   app.use('/api', createFilesRouter({ db }));
+  app.use('/api', createPreviewRouter({ db }));
   app.use('/api', createCompletenessRouter({ db }));
   app.use('/api', createRemarksRouter({ db }));
   app.use('/api', createNotificationsRouter({ db }));

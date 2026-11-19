@@ -1,6 +1,6 @@
 {
   "name": "infoteh-balakovo-knowledge-base",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "База знаний и реестр ПТО ООО «ИНФОТЕХ БАЛАКОВО»",
   "type": "module",
@@ -15,6 +15,7 @@
     "migrate-pto": "node migrate-pto.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",
+    "report-filenames": "node scripts/report-old-filenames.js",
     "test": "node --test tests/"
   },
   "dependencies": {
