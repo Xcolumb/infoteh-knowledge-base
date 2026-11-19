@@ -31,7 +31,7 @@ export function createStaffRouter({ db }) {
     const rows = db.prepare(`
       SELECT "ID_сотрудника" as id, "Табельный_номер" as tabNumber, "ФИО" as fullName,
              "Должность" as role, "Демо" as demo, "Заблокирован" as blocked,
-             "Пароль_обновлён" as passwordUpdatedAt, "updated_at" as updatedAt
+             "Пароль_обновлён" as passwordUpdatedAt
       FROM "Сотрудник"
       ORDER BY "ID_сотрудника"
     `).all();

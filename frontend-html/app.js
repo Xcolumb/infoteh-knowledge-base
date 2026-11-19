@@ -813,9 +813,32 @@ async function deleteRabota(id) {
 // --- Сотрудники ---
 
 async function loadUsers() {
-  const data = await apiJsonSafe(`${API_BASE}/sotrudniki`);
-  state.users = data ? data.data : [];
-  renderUsers();
+  const container = $('users-list');
+
+  try {
+    const data = await apiJson(`${API_BASE}/sotrudniki`);
+    state.users = data ? data.data : [];
+    renderUsers();
+  } catch (error) {
+    if (error instanceof AuthError) return;
+
+    // Не оставляем пустую таблицу: администратор должен видеть причину
+    // и иметь возможность повторить загрузку без перезагрузки страницы.
+    state.users = [];
+    if (container) {
+      container.innerHTML = `
+        <tr>
+          <td colspan="6">
+            <div class="empty-state">
+              <h3>Не удалось загрузить список сотрудников</h3>
+              <p>${escapeHtml(error.message)}</p>
+              <button type="button" class="action-btn" onclick="loadUsers()">Повторить</button>
+            </div>
+          </td>
+        </tr>`;
+    }
+    toast(error.message, 'error');
+  }
 }
 
 function renderUsers() {
