@@ -16,7 +16,7 @@ test('брендинг: «Информационная система ПТО»',
   });
 
   await t.test('document.title обновлён', () => {
-    assert.ok(html.includes('<title>Информационная система ПТО — ООО «ИНФОТЕХ БАЛАКОВО»</title>'));
+    assert.ok(html.includes('<title>Информационная система ПТО — ООО «ЭКСПО-М»</title>'));
   });
 
   await t.test('в подвале новое название и назначение', () => {
@@ -29,9 +29,20 @@ test('брендинг: «Информационная система ПТО»',
     assert.ok(!html.toLowerCase().includes('база знаний монтажников'));
   });
 
-  await t.test('раздел «Каталог знаний» сохранён', () => {
+  await t.test('раздел «База знаний» сохранён', () => {
     assert.ok(html.includes('data-page="catalog"'));
-    assert.ok(html.includes('Каталог знаний'));
+    assert.ok(html.includes('База знаний'));
+  });
+
+  await t.test('общая навигация и новый бренд', () => {
+    assert.equal((html.match(/id="nav-dashboard"/g) || []).length, 1);
+    assert.match(html, /<dialog id="drawer"/);
+    assert.ok(html.includes('data-page="instructions"'));
+    assert.ok(html.includes('data-page="about"'));
+    assert.ok(html.includes('Регионального центра обработки данных'));
+    assert.ok(!html.includes('ИНФОТЕХ БАЛАКОВО'));
+    assert.ok(!html.includes('src="img/logo.png"'));
+    assert.equal((html.match(/class="brand" src="img\/expo-m\.png"/g) || []).length, 4);
   });
 
   await t.test('роли пользователей не переименованы', () => {
@@ -41,7 +52,7 @@ test('брендинг: «Информационная система ПТО»',
   });
 
   await t.test('наименование организации сохранено', () => {
-    assert.ok(html.includes('ООО «ИНФОТЕХ БАЛАКОВО»'));
+    assert.ok(html.includes('ООО «ЭКСПО-М»'));
   });
 
   await t.test('на экране входа нет старой подписи продукта', () => {
