@@ -50,6 +50,21 @@ try {
     await page.locator('#login-form button[type=submit]').click();
     await page.locator('#dashboard-stats .number').first().waitFor();
   }
+  async function checkGallery(count) {
+    await page.waitForFunction(n => document.querySelectorAll('#project-gallery img').length === n, count);
+    for (const image of await page.locator('#project-gallery img').all()) {
+      const fitsFrame = await image.evaluate(async img => {
+        await img.decode();
+        const box = img.getBoundingClientRect();
+        const frame = img.parentElement.getBoundingClientRect();
+        const expectedHeight = box.width * img.naturalHeight / img.naturalWidth;
+        return box.width > 0 && Math.abs(box.height - expectedHeight) <= 1
+          && box.left >= frame.left - 1 && box.right <= frame.right + 1
+          && box.top >= frame.top - 1 && box.bottom <= frame.bottom + 1;
+      });
+      assert.ok(fitsFrame, 'Фотография целиком помещается в рамку с исходными пропорциями');
+    }
+  }
   async function go(name) {
     await el('nav-toggle').click();
     await el('nav-' + name).click();
@@ -188,11 +203,19 @@ try {
     await go('about');
     assert.equal(await el('project-photo-add').isVisible(), admin);
     if (admin) {
-      const jpeg = await page.evaluate(() => document.createElement('canvas').toDataURL('image/jpeg').split(',')[1]);
-      const picker = page.waitForEvent('filechooser');
-      await el('project-photo-add').click();
-      await (await picker).setFiles({ name: 'объект.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(jpeg, 'base64') });
-      await page.locator('#project-gallery img').evaluate(img => img.decode());
+      const dimensions = [[1600, 600], [600, 1600]];
+      for (const [index, size] of dimensions.entries()) {
+        const jpeg = await page.evaluate(([width, height]) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          return canvas.toDataURL('image/jpeg').split(',')[1];
+        }, size);
+        const picker = page.waitForEvent('filechooser');
+        await el('project-photo-add').click();
+        await (await picker).setFiles({ name: 'объект.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(jpeg, 'base64') });
+        await checkGallery(index + 1);
+      }
       await go('users');
       await el('users-page').getByRole('heading', { name: 'Управление сотрудниками' }).waitFor();
     } else {
@@ -207,7 +230,8 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await go('about');
   assert.equal(await el('project-photo-add').isVisible(), false);
-  await page.locator('#project-gallery button').click();
+  await checkGallery(2);
+  await page.locator('#project-gallery button').first().click();
   await page.locator('#project-photo img').evaluate(img => img.decode());
   await fits('Фотография объекта на телефоне');
   assert.deepEqual(errors, []);
