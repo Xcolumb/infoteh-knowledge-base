@@ -149,6 +149,22 @@ try {
   await admin.locator('.task-history').getByText('Добавить номер листа.').waitFor();
   await admin.locator('#task-close').click();
 
+  await admin.locator('#task-new').click();
+  await form.locator('[name=title]').fill('Свободная задача');
+  assert.equal(await form.locator('[name=assigneeId]').isDisabled(),true);
+  await form.locator('[name=objectId]').selectOption(String(ctx.objectA));
+  await form.locator('[name=assigneeId]').selectOption('');
+  await form.locator('button[type=submit]').click();
+  await status(admin,'Новая');
+  await admin.locator('#task-body dd').getByText('Не назначен',{exact:true}).waitFor();
+  await admin.locator('#task-close').click();
+  await engineer.locator('[data-scope=all]').click();
+  await card(engineer,'Свободная задача');
+  await engineer.locator('[data-transition=claim]').click();
+  await status(engineer,'В работе');
+  assert.equal(await engineer.locator('#task-body dd').getByText('Не назначен',{exact:true}).count(),0);
+  await engineer.locator('#task-close').click();
+
   for (const role of ['Монтажник','Старший монтажник']) {
     ctx.db.prepare('UPDATE Сотрудник SET Должность=? WHERE ID_сотрудника=?').run(role,ctx.byTab.M900);
     const worker=await login('M900',PASSWORDS.worker);

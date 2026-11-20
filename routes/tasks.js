@@ -10,7 +10,7 @@ import { capabilities, candidates, checkVersion, fieldsOnly, history, listTasks,
 const editable = ['title','description','assigneeId','dueDate','priority','documentId','remarkId'];
 const labels = { title:'Название', description:'Описание', assigneeId:'Исполнитель', dueDate:'Срок',
   priority:'Приоритет', documentId:'Связанный документ', remarkId:'Связанное замечание' };
-const events = { start:'Работа начата', submit:'Задача на проверке', accept:'Результат принят',
+const events = { claim:'Задача взята в работу', start:'Работа начата', submit:'Задача на проверке', accept:'Результат принят',
   return:'Возврат на доработку', cancel:'Задача отменена' };
 
 export function createTasksRouter({ db }) {
@@ -94,14 +94,21 @@ export function createTasksRouter({ db }) {
       fieldsOnly(req.body,['action','reason','version']);
       if (!Object.hasOwn(events,req.body.action)) throw badRequest('Неизвестный переход');
       const rights = capabilities(req.user,task);
-      requireAction(rights.edit || rights.comment);
+      if (req.body.action === 'claim') requireAction(req.user.role === 'Инженер ПТО');
+      else requireAction(rights.edit || rights.comment);
       checkVersion(task,req.body.version);
       const action = rights.actions.find(a => a.key === req.body.action);
       requireAction(action);
       const reason = text(req.body.reason,{ required:action.key === 'return',max:2000,field:'Пояснение' });
-      db.prepare('UPDATE Задача SET status=?,version=version+1,updatedAt=CURRENT_TIMESTAMP WHERE id=?').run(action.to,task.id);
+      const assignee = action.key === 'claim' ? req.user.id : task.assigneeId;
+      db.prepare('UPDATE Задача SET assigneeId=?,status=?,version=version+1,updatedAt=CURRENT_TIMESTAMP WHERE id=?')
+        .run(assignee,action.to,task.id);
       const next = taskById(db,req.user,task.id);
       history(db,task.id,req.user,events[action.key],task.status,next.status,reason);
+      if (action.key === 'claim') {
+        history(db,task.id,req.user,labels.assigneeId,null,next.assignee);
+        if (task.creatorId !== req.user.id) notifyTask(db,next,req.user,events.claim,[task.creatorId]);
+      }
       if (action.key === 'submit') notifyTask(db,next,req.user,events.submit,[task.creatorId]);
       if (['accept','return'].includes(action.key)) notifyTask(db,next,req.user,events[action.key],[task.assigneeId]);
       audit(req,next,events[action.key]);

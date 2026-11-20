@@ -151,6 +151,23 @@ test('задачи: границы модуля, жизненный цикл и 
     assert.equal((await get(admin,'tasks/'+isolated.id)).data.version,1);
   });
 
+  await t.test('свободная задача и одновременное взятие в работу',async()=>{
+    const task=(await create(admin,{assigneeId:null})).data;
+    assert.equal(task.assigneeId,null);
+    const target='tasks/'+task.id+'/transitions';
+    const claim={version:task.version,action:'claim'};
+    await call(admin,'POST',target,claim,403);
+    await call(worker,'POST',target,claim,403);
+    const responses=await Promise.all([owner,engineer].map(client=>client.request('POST','/api/'+target,{body:claim})));
+    assert.deepEqual(responses.map(r=>r.status).sort(),[200,409]);
+    const next=(await get(admin,'tasks/'+task.id)).data;
+    assert.equal(next.status,'В работе');
+    assert.equal(next.assigneeId,responses[0].status===200?byTab.PTO900:byTab.PTO901);
+    assert.ok(next.assignee);
+    const foreign=(await create(admin,{objectId:objectB,assigneeId:null})).data;
+    await call(engineer,'POST','tasks/'+foreign.id+'/transitions',claim,404);
+  });
+
   await t.test('ошибка обязательного уведомления откатывает задачу и историю',async()=>{
     const before=db.prepare('SELECT count(*) AS n FROM Задача').get();
     const log=db.prepare('SELECT count(*) AS n FROM История_задачи').get();

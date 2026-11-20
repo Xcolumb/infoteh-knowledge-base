@@ -61,7 +61,7 @@ const taskUI = (() => {
       $('task-total').textContent = 'Найдено: ' + rows.total;
       $('task-rows').innerHTML = rows.data.map(t => `<tr>
         <td><button class="text-btn" data-task="${t.id}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.objectName)}</small></td>
-        <td>${escapeHtml(t.assignee)}</td><td class="${t.overdue?'pto-overdue':''}">${formatDate(t.dueDate)}${t.overdue?' · просрочена':''}</td>
+        <td>${escapeHtml(t.assignee || 'Не назначен')}</td><td class="${t.overdue?'pto-overdue':''}">${formatDate(t.dueDate)}${t.overdue?' · просрочена':''}</td>
         <td>${escapeHtml(t.priority)}</td><td><span class="status-badge">${escapeHtml(t.status)}</span></td></tr>`).join('');
       $('task-empty').hidden = rows.total > 0;
       const pages = Math.max(1,Math.ceil(rows.total/25));
@@ -107,7 +107,7 @@ const taskUI = (() => {
       if (token !== cardRequest || !panel.open) return;
       current = result.data;
       const t = current, rights = t.permissions;
-      const props = [['Объект',t.objectName],['Постановщик',t.creator],['Исполнитель',t.assignee],['Срок',formatDate(t.dueDate)],
+      const props = [['Объект',t.objectName],['Постановщик',t.creator],['Исполнитель',t.assignee || 'Не назначен'],['Срок',formatDate(t.dueDate)],
         ['Приоритет',t.priority],['Создана',dateTime(t.createdAt)],['Обновлена',dateTime(t.updatedAt)]];
       $('task-body').innerHTML = `<span class="status-badge">${escapeHtml(t.status)}</span><h3 class="task-title">${escapeHtml(t.title)}</h3>
         <p class="task-copy">${escapeHtml(t.description)}</p><dl class="task-props">${props.map(([key,value])=>`<div><dt>${key}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
@@ -148,7 +148,7 @@ const taskUI = (() => {
       ${input('Название','<input name="title" required maxlength="240">')}
       ${input('Описание','<textarea name="description" rows="3" maxlength="10000"></textarea>')}
       ${input('Объект','<select name="objectId" required></select>')}
-      ${input('Исполнитель','<select name="assigneeId" required></select>')}
+      ${input('Исполнитель','<select name="assigneeId"></select>')}
       <div class="form-row">${input('Срок','<input name="dueDate" type="date">')}${input('Приоритет','<select name="priority"></select>')}</div>
       ${input('Связанная запись','<select name="link"></select>')}
       <button type="submit" class="btn btn-primary" disabled>Сохранить</button></form>`;
@@ -164,17 +164,20 @@ const taskUI = (() => {
     async function choices() {
       const n = ++serial, object = fields.objectId.value;
       form.querySelector('button').disabled = true;
-      fields.assigneeId.replaceChildren(); fields.link.replaceChildren();
+      fields.assigneeId.disabled = true;
+      fields.assigneeId.innerHTML = option('',object?'Загрузка…':'Сначала выберите объект');
+      fields.link.replaceChildren();
       if (!object) return;
       try {
         const [people,targets] = await Promise.all(['/assignees','/targets'].map(p=>apiJson(base+p+'?objectId='+object)));
         if (n !== serial || token !== cardRequest) return;
-        fields.assigneeId.innerHTML = option('',people.data.length?'Выберите инженера ПТО':'Нет доступных инженеров') + people.data.map(p=>option(p.id,p.name)).join('');
+        fields.assigneeId.innerHTML = option('','Не назначен — свободная задача') + people.data.map(p=>option(p.id,p.name)).join('');
         fields.link.innerHTML = option('','Без связи') + targets.docs.map(d=>option('d'+d.id,'Документ · '+d.title)).join('')
           + targets.remarks.map(r=>option('r'+r.id,'Замечание · '+r.title)).join('');
         fields.link.value = t?.documentId?'d'+t.documentId:t?.remarkId?'r'+t.remarkId:'';
         fields.assigneeId.value = t?.assigneeId || '';
-        form.querySelector('button').disabled = !people.data.length;
+        fields.assigneeId.disabled = false;
+        form.querySelector('button').disabled = false;
       } catch (error) { if (n === serial && token === cardRequest) panelError(error); }
     }
     fields.objectId.addEventListener('change',choices);
