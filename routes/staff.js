@@ -213,6 +213,10 @@ export function createStaffRouter({ db }) {
         throw conflict(`Невозможно удалить: сотрудник указан автором ${linked} статей. Заблокируйте учётную запись вместо удаления.`);
       }
 
+      const taskReference = db.prepare(`SELECT 1 FROM Задача WHERE creatorId=? OR assigneeId=?
+        UNION ALL SELECT 1 FROM Комментарий_задачи WHERE authorId=?
+        UNION ALL SELECT 1 FROM История_задачи WHERE actorId=? LIMIT 1`).get(employeeId, employeeId, employeeId, employeeId);
+      if (taskReference) throw conflict('Сотрудник связан с задачами. Доступ можно прекратить блокировкой.');
       db.prepare('DELETE FROM "Сотрудник" WHERE "ID_сотрудника" = ?').run(employeeId);
 
       writeAudit(db, {

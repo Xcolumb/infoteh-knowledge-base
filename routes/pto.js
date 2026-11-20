@@ -173,6 +173,7 @@ export function createPtoRouter({ db }) {
           throw conflict('К объекту привязан комплект ИД');
         }
 
+        if (db.prepare('SELECT 1 FROM Задача WHERE objectId = ? LIMIT 1').get(id)) throw conflict('К объекту привязаны задачи');
         const result = db.prepare('DELETE FROM "Объект" WHERE "ID_объекта" = ?').run(id);
         if (!result.changes) throw notFound();
       }).immediate();
