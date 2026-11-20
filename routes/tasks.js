@@ -1,7 +1,7 @@
 import express from 'express';
 import { ok } from '../lib/middleware.js';
 import { badRequest } from '../lib/errors.js';
-import { requirePtoManager, assertObjectAccess } from '../lib/permissions.js';
+import { assertTaskAccess, assertObjectAccess } from '../lib/permissions.js';
 import { id, text } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
 import { capabilities, candidates, checkVersion, fieldsOnly, history, listTasks, notifyTask,
@@ -16,7 +16,7 @@ const events = { claim:'Задача взята в работу', start:'Раб�
 export function createTasksRouter({ db }) {
   db.function('task_fold', { deterministic: true }, value => String(value ?? '').toLocaleLowerCase('ru'));
   const router = express.Router();
-  router.use(requirePtoManager);
+  router.use((req, res, next) => { assertTaskAccess(req.user); next(); });
 
   router.get('/', (req,res) => ok(res,listTasks(db,req.user,req.query)));
   router.get('/summary', (req,res) => ok(res,{ data:listTasks(db,req.user,req.query,true) }));

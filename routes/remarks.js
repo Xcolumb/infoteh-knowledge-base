@@ -2,7 +2,7 @@ import { fileTransaction } from '../lib/file-transaction.js';
 import express from 'express';
 import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { ok } from '../lib/middleware.js';
-import { assertAdmin, assertManagePto, assertObjectAccess, assertDocumentLink, requirePtoManager, isAdmin, objectScopeClause } from '../lib/permissions.js';
+import { canCommentRemarks, assertAdmin, assertManagePto, assertObjectAccess, assertDocumentLink, requirePtoManager, isAdmin, objectScopeClause } from '../lib/permissions.js';
 import { id as parseId, isoDate, oneOf, text } from '../lib/validate.js';
 import { NOTIFICATION_TYPES, REMARK_CLOSED_STATUSES } from '../lib/constants.js';
 import { stagedUpload } from '../lib/files.js';
@@ -292,6 +292,7 @@ export function createRemarksRouter({ db }) {
 
   router.post('/remarks/:id/comments', (req, res, next) => {
     try {
+      if (!canCommentRemarks(req.user)) throw forbidden('Замечания доступны только для чтения');
       const response = db.transaction(() => {
         const id = parseId(req.params.id, { field: 'Замечание' });
         const remark = getRemark(db, id);

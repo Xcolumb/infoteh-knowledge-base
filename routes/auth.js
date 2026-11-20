@@ -8,7 +8,7 @@ import { csrfProtection, ensureCsrfToken, isLoginBlocked, recordLoginFailure, re
 import { password as validatePassword, text } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
 import { logger } from '../lib/logger.js';
-import { canManageContent, canManagePto, canManageStaff } from '../lib/permissions.js';
+import { sessionPermissions } from '../lib/permissions.js';
 
 const DUMMY_HASH = '$2b$10$CwTycUXWue0Thq9StjUM0uJ8.2mFVRCcL5F0m7Vj2T3w4W5n6Y7a8';
 
@@ -101,11 +101,7 @@ export function createAuthRouter({ db }) {
         ok(res, {
           user: publicUser(employee),
           csrfToken,
-          permissions: {
-            admin: canManageStaff(employee),
-            content: canManageContent(employee),
-            pto: canManagePto(employee)
-          }
+          permissions: sessionPermissions(employee)
         });
       });
     });
@@ -132,11 +128,7 @@ export function createAuthRouter({ db }) {
     ok(res, {
       user: publicUser({ ...req.user, demo: req.user.demo }),
       csrfToken: ensureCsrfToken(req),
-      permissions: {
-        admin: canManageStaff(req.user),
-        content: canManageContent(req.user),
-        pto: canManagePto(req.user)
-      }
+      permissions: sessionPermissions(req.user)
     });
   });
 

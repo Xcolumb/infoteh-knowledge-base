@@ -1,7 +1,7 @@
 import express from 'express';
 import { ok } from '../lib/middleware.js';
 import { searchAll, indexedCount, ftsAvailable } from '../lib/search.js';
-import { canManagePto } from '../lib/permissions.js';
+import { canUseTasks } from '../lib/permissions.js';
 import { listTasks } from '../lib/tasks.js';
 import { writeAudit } from '../lib/audit.js';
 
@@ -14,7 +14,7 @@ export function createSearchRouter({ db }) {
 
     const { engine, results } = searchAll(db, { query, user: req.user, limit });
 
-    if (canManagePto(req.user) && query.length >= 2 && results.length < limit) {
+    if (canUseTasks(req.user) && query.length >= 2 && results.length < limit) {
       const matches = listTasks(db,req.user,{ q:query, limit:limit-results.length });
       results.push(...matches.data.map(task => ({ kind:'task',id:task.id,title:task.title,
         objectId:task.objectId,fragment:task.objectName,highlights:[] })));

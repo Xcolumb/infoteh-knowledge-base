@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { asyncHandler } from '../lib/errors.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { ok } from '../lib/middleware.js';
-import { assertAdmin } from '../lib/permissions.js';
+import { assertAdmin, isLead } from '../lib/permissions.js';
 import { id as parseId, oneOf, password as validatePassword, text } from '../lib/validate.js';
 import { ROLES } from '../lib/constants.js';
 import { writeAudit } from '../lib/audit.js';
@@ -37,7 +37,7 @@ export function createStaffRouter({ db }) {
     `).all();
 
     ok(res, {
-      data: rows.map((row) => ({ ...row, demo: Boolean(row.demo), blocked: Boolean(row.blocked), objectIds: getEmployeeObjectIds(db, row.id) }))
+      data: rows.map((row) => ({ ...row, globalObjectRead: isLead(row), demo: Boolean(row.demo), blocked: Boolean(row.blocked), objectIds: getEmployeeObjectIds(db, row.id) }))
     });
   });
 
@@ -58,7 +58,7 @@ export function createStaffRouter({ db }) {
       VALUES (?, ?, ?, ?, 0, datetime('now', 'localtime'))
     `).run(tabNumber, hash, fullName, role);
 
-    if (Array.isArray(req.body.objectIds)) {
+    if (!isLead({role}) && Array.isArray(req.body.objectIds)) {
       setEmployeeObjectAccess(db, result.lastInsertRowid, req.body.objectIds.map(Number).filter(Number.isInteger));
     }
 
@@ -91,7 +91,10 @@ export function createStaffRouter({ db }) {
         throw conflict('В системе должен остаться хотя бы один активный администратор');
       }
 
-      db.prepare('UPDATE "Сотрудник" SET "Должность" = ? WHERE "ID_сотрудника" = ?').run(role, employeeId);
+      db.transaction(() => {
+        db.prepare('UPDATE "Сотрудник" SET "Должность" = ? WHERE "ID_сотрудника" = ?').run(role, employeeId);
+        if (isLead({role})) setEmployeeObjectAccess(db,employeeId,[]);
+      }).immediate();
 
       writeAudit(db, {
         user: req.user,
@@ -136,9 +139,10 @@ export function createStaffRouter({ db }) {
   router.put('/sotrudniki/:id/access', adminOnly, (req, res, next) => {
     try {
       const employeeId = parseId(req.params.id, { field: 'Сотрудник' });
-      const employee = db.prepare('SELECT "ID_сотрудника" FROM "Сотрудник" WHERE "ID_сотрудника" = ?').get(employeeId);
+      const employee = db.prepare('SELECT "ID_сотрудника", "Должность" AS role FROM "Сотрудник" WHERE "ID_сотрудника" = ?').get(employeeId);
       if (!employee) throw notFound('Сотрудник не найден');
 
+      if (isLead(employee)) throw badRequest('Руководителю доступны все объекты');
       if (!Array.isArray(req.body.objectIds)) throw badRequest('objectIds должен быть массивом');
 
       const objectIds = req.body.objectIds.map(Number).filter((value) => Number.isInteger(value) && value > 0);
