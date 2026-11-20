@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -56,6 +57,9 @@ test('резервное копирование и восстановление'
   });
 
   await t.test('восстановление возвращает данные', async () => {
+    await createBackup({label:'second'});
+    await createBackup({label:'third'});
+    fs.writeFileSync(path.join(process.env.UPLOADS_PATH,'extra.pdf'),'EXTRA');
     const dbBefore = openDatabase();
     dbBefore.prepare(`DELETE FROM "Документ_ПТО"`).run();
     dbBefore.prepare(`DELETE FROM "Объект"`).run();
@@ -63,6 +67,8 @@ test('резервное копирование и восстановление'
 
     const result = await restoreBackup(backupDir, { force: true });
     assert.equal(result.restored, true);
+    assert.ok(fs.existsSync(backupDir));
+    assert.equal(fs.existsSync(path.join(process.env.UPLOADS_PATH,'extra.pdf')),false);
     assert.ok(fs.existsSync(result.safety), 'должна быть создана страховочная копия');
 
     const restored = openDatabase();
@@ -74,6 +80,28 @@ test('резервное копирование и восстановление'
     assert.equal(objects, 1);
     assert.equal(documents, 1);
     assert.equal(file, 'BACKUP-FILE');
+  });
+
+  await t.test('остановка процесса между заменами позволяет вернуть прежний комплект',async()=>{
+    fs.writeFileSync(path.join(process.env.UPLOADS_PATH,'prior.txt'),'before');
+    const child = spawnSync(process.execPath,['--input-type=module','-e',`
+      import fs from 'node:fs';
+      import {restoreBackup} from './lib/backup.js';
+      const rename = fs.renameSync;
+      fs.renameSync = (a,b) => {
+        rename(a,b);
+        if (a === process.env.UPLOADS_PATH) process.exit(77);
+      };
+      await restoreBackup(process.argv[1],{force:true});
+    `,backupDir],{encoding:'utf8'});
+    assert.equal(child.status,77,child.stderr);
+    const {recoverRestore,lockInstallation}=await import('../lib/restore-install.js');
+    const lock=lockInstallation();
+    try { recoverRestore(); recoverRestore(); } finally { lock.close(); }
+    assert.equal(fs.readFileSync(path.join(process.env.UPLOADS_PATH,'prior.txt'),'utf8'),'before');
+    const db=openDatabase();
+    assert.equal(db.pragma('integrity_check',{simple:true}),'ok');
+    db.close();
   });
 
   await t.test('без --force восстановление отклоняется', async () => {

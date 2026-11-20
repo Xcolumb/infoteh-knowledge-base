@@ -1,3 +1,4 @@
+import { lockInstallation, recoverRestore } from './lib/restore-install.js';
 // Точка входа production-сервера.
 // Конфигурация берётся из .env (см. .env.example и DEPLOYMENT_RU_VPS.md).
 import config from './config.js';
@@ -7,6 +8,10 @@ import { logger } from './lib/logger.js';
 import { ftsAvailable, rebuildSearchIndex } from './lib/search.js';
 import { runNotificationScheduler } from './lib/notifications.js';
 
+const recoveryLock = lockInstallation();
+try { recoverRestore(); } finally { recoveryLock.close(); }
+const installationLock = lockInstallation(false);
+process.on('exit', () => installationLock.close());
 const db = openDatabase();
 const { app } = createApp({ db });
 

@@ -21,3 +21,6 @@ logs/
 
 # Генерируемые отчёты (dry-run) — файл отчёта в reports/ хранится отдельно
 reports/*.csv
+
+*.maintenance-lock
+*.restore-journal
