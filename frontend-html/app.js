@@ -2228,7 +2228,7 @@ async function openNotifications() {
   if (!data) return;
 
   const items = data.data.map((item) => `
-    <div class="compact-item">
+    <div class="compact-item notification-row">
       <div>
         <div>${escapeHtml(item.text)}</div>
         <div class="pto-doc-sub">${formatDateTime(item.createdAt)}</div>
