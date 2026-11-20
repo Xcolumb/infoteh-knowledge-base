@@ -18,7 +18,7 @@ const taskUI = (() => {
     state.user = session.user;
     state.permissions = session.permissions;
     applyRoleVisibility();
-    if (!state.permissions.pto) {
+    if (!state.permissions.tasks) {
       if (panel.open) panel.close();
       $('task-rows').replaceChildren();
       $('task-metrics').replaceChildren();
@@ -33,7 +33,7 @@ const taskUI = (() => {
     if ([...select.options].some(o => o.value === old)) select.value = old;
   }
   async function load() {
-    if (!state.permissions.pto) return;
+    if (!state.permissions.tasks) return;
     try {
       const [fresh,objects] = await Promise.all([apiJson(base+'/meta'),apiJson(API_BASE+'/objects')]);
       meta = { ...fresh,objects:objects.data };
@@ -46,7 +46,7 @@ const taskUI = (() => {
     }
   }
   async function refresh() {
-    if (state.currentPage !== 'tasks' || !state.permissions.pto) return;
+    if (state.currentPage !== 'tasks' || !state.permissions.tasks) return;
     const token = ++listRequest;
     const params = new URLSearchParams({ scope,sort:$('task-sort').value,page,limit:25 });
     for (const [key,id] of [['q','task-q'],['objectId','task-object'],['status','task-status'],['priority','task-priority']]) {
@@ -210,9 +210,9 @@ const taskUI = (() => {
       save(event.currentTarget,base+'/'+t.id+'/transitions','POST',{version:t.version,action,reason:event.currentTarget.elements.reason.value},t.id);
     };
   });
-  async function fromLink(id) { await navigateTo('tasks'); if (state.permissions.pto && meta) await openTask(id); }
+  async function fromLink(id) { await navigateTo('tasks'); if (state.permissions.tasks && meta) await openTask(id); }
   $('task-rows').onclick = e=>{ const b = e.target.closest('[data-task]'); if (b) openTask(b.dataset.task); };
-  $('task-new').onclick = ()=>{ if (meta && state.permissions.pto) edit(); };
+  $('task-new').onclick = ()=>{ if (meta && state.permissions.tasks) edit(); };
   $('task-close').onclick = ()=>panel.close();
   panel.onclose = ()=>{ ++cardRequest; current=null; $('task-body').replaceChildren(); document.body.classList.remove('task-open'); };
   $('task-q').oninput = ()=>{ clearTimeout(debounce); debounce=setTimeout(()=>{ page=1; refresh(); },180); };
@@ -221,9 +221,9 @@ const taskUI = (() => {
   $('task-scopes').onclick = e=>{ const b=e.target.closest('[data-scope]'); if (b) { const s=b.dataset.scope; scope=s==='overdue'?'all':s; metric=s==='overdue'?'overdue':''; page=1; refresh(); } };
   $('task-prev').onclick = ()=>{ page--; refresh(); };
   $('task-next').onclick = ()=>{ page++; refresh(); };
-  $('nav-toggle').addEventListener('click',()=>{ if (state.permissions.pto) accessChanged().catch(report); });
+  $('nav-toggle').addEventListener('click',()=>{ if (state.permissions.tasks) accessChanged().catch(report); });
   document.addEventListener('visibilitychange',()=>{
-    if (!document.hidden && state.user && state.permissions.pto) accessChanged().catch(report);
+    if (!document.hidden && state.user && state.permissions.tasks) accessChanged().catch(report);
     if (!document.hidden && state.user && state.currentPage === 'tasks') {
       load();
       if (current && panel.open && !$('task-form')) openTask(current.id);

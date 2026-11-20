@@ -2,7 +2,7 @@
 // комплектность ИД, замечания, отчёты, уведомления и профиль.
 const API_BASE = '/api';
 
-const ROLES = ['Монтажник', 'Старший монтажник', 'Инженер ПТО', 'Администратор'];
+const ROLES = ['Монтажник', 'Старший монтажник', 'Инженер ПТО', 'Руководитель', 'Администратор'];
 
 class AuthError extends Error {
   constructor(status, message) {
@@ -899,10 +899,10 @@ function renderUsers() {
           ${ROLES.map((role) => `<option value="${escapeAttr(role)}" ${user.role === role ? 'selected' : ''}>${escapeHtml(role)}</option>`).join('')}
         </select>
       </td>
-      <td class="user-access">${(user.objectIds || []).length ? `${user.objectIds.length} объектов` : 'нет доступа'}</td>
+      <td class="user-access">${user.globalObjectRead ? 'Все объекты' : (user.objectIds || []).length ? `${user.objectIds.length} объектов` : 'нет доступа'}</td>
       <td>
         <div class="actions-cell">
-          <button class="action-btn edit" onclick="openAccessModal(${user.id})" title="Доступ к объектам">Объекты</button>
+          <button ${user.globalObjectRead ? 'hidden' : ''} class="action-btn edit" onclick="openAccessModal(${user.id})" title="Доступ к объектам">Объекты</button>
           <button class="action-btn edit" onclick="resetUserPassword(${user.id})" title="Сбросить пароль">Пароль</button>
           ${state.user && user.id !== state.user.id ? `
             <button class="action-btn" onclick="toggleBlock(${user.id}, ${user.blocked ? 0 : 1})">${user.blocked ? 'Разблокировать' : 'Блокировать'}</button>
@@ -1558,7 +1558,7 @@ async function loadDashboard() {
     ['Документов', stats?.total, 'doc'], ['В работе', stats?.inWork, 'clock'],
     ['Просрочено', stats?.overdue, 'calendar'], ['Открытых замечаний', stats?.remarksOpen, 'remarks']
   ];
-  $('dashboard-stats').innerHTML = measures.map(([label, n, icon]) =>
+  $('dashboard-stats').innerHTML = measures.filter(([, n]) => Number.isFinite(n)).map(([label, n, icon]) =>
     `<div class="stat-card"><div class="metric-label">${label}${uiIcon(icon)}</div><strong class="number">${n ?? '—'}</strong></div>`
   ).join('');
   const empty = (response, label) => '<p class="compact-empty">' + (response ? label : 'Не удалось загрузить данные') + '</p>';
@@ -2105,10 +2105,10 @@ async function openRemarkDetail(id) {
       <div class="pto-detail-section">
         <h3>Комментарии</h3>
         ${comments || '<p class="card-hint">Комментариев пока нет</p>'}
-        <div class="pto-status-row" style="margin-top:10px">
+        ${state.permissions.remarkComments ? `<div class="pto-status-row" style="margin-top:10px">
           <input type="text" id="remark-comment-input" class="search-input" placeholder="Добавить комментарий">
           <button type="button" class="btn btn-secondary" onclick="addRemarkComment(${remark.id})">Добавить</button>
-        </div>
+        </div>` : ''}
       </div>
 
       <div class="pto-detail-section">

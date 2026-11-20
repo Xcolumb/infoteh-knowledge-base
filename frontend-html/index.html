@@ -48,7 +48,7 @@
       <div class="drawer-head"><img class="brand" src="img/expo-m.png" alt="ЭКСПО-М"><strong id="drawer-title">Информационная<br>система ПТО</strong><button class="icon-btn" id="drawer-close" aria-label="Закрыть меню"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button></div>
       <nav aria-label="Основная навигация"><div class="nav-group"><h2>Главная</h2><button type="button" class="nav-btn" id="nav-dashboard" data-page="dashboard"><svg class="icon" aria-hidden="true"><use href="#i-home"></use></svg>Рабочая панель</button></div>
 <div class="nav-group"><h2>ПТО</h2><button type="button" class="nav-btn" id="nav-objects" data-page="objects"><svg class="icon" aria-hidden="true"><use href="#i-building"></use></svg>Строительные объекты</button>
-<button type="button" class="nav-btn" id="nav-tasks" data-page="tasks" data-permission="pto" hidden><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>Задачи</button>
+<button type="button" class="nav-btn" id="nav-tasks" data-page="tasks" data-permission="tasks" hidden><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>Задачи</button>
 <button type="button" class="nav-btn" id="nav-pto" data-page="pto"><svg class="icon" aria-hidden="true"><use href="#i-doc"></use></svg>Реестр документов</button>
 <button type="button" class="nav-btn" id="nav-executive" data-page="executive"><svg class="icon" aria-hidden="true"><use href="#i-stack"></use></svg>Исполнительная документация</button>
 <button type="button" class="nav-btn" id="nav-completeness" data-page="completeness"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>Комплектность ИД</button>
@@ -398,6 +398,7 @@
                 <select id="new-role">
                   <option value="Монтажник">Монтажник</option>
                   <option value="Старший монтажник">Старший монтажник</option>
+                  <option value="Руководитель">Руководитель</option>
                   <option value="Инженер ПТО">Инженер ПТО</option>
                   <option value="Администратор">Администратор</option>
                 </select>
@@ -455,6 +456,15 @@
               <li class="allowed">✓ Смена статусов и объектов</li>
               <li class="allowed">✓ Выгрузка реестра документов</li>
               <li class="denied">✗ Управление сотрудниками</li>
+            </ul>
+          </div>
+          <div class="role-card">
+            <h4>Руководитель</h4>
+            <ul>
+              <li class="allowed">✓ Просмотр всех строительных объектов и их документов</li>
+              <li class="allowed">✓ Сводные отчёты и выгрузки по объектам</li>
+              <li class="allowed">✓ Управление задачами всех объектов</li>
+              <li class="denied">✗ Изменение документов и управление сотрудниками</li>
             </ul>
           </div>
           <div class="role-card">
