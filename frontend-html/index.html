@@ -66,10 +66,11 @@
     <header class="topbar">
       <button class="icon-btn" id="nav-toggle" aria-label="Открыть меню" aria-controls="drawer" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"></use></svg></button>
       <img class="brand" src="img/expo-m.png" alt="ЭКСПО-М"><span id="section-title">Рабочая панель</span>
-      <form id="top-search" role="search"><button id="global-search-btn" aria-label="Поиск"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></button><input id="global-search" aria-label="Поиск по системе" placeholder="Найти в системе…" autocomplete="off"></form>
+      <form id="top-search" role="search"><button id="global-search-btn" aria-label="Поиск"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></button><input id="global-search" aria-label="Поиск по системе" placeholder="Найти в системе…" autocomplete="off" aria-controls="global-search-results">
+        <div id="global-search-results" class="search-results" aria-live="polite" hidden></div>
+      </form>
       <button class="icon-btn" id="notifications-btn" aria-label="Уведомления"><svg class="icon" aria-hidden="true"><use href="#i-bell"></use></svg><span id="notifications-badge" class="notification-badge hidden"></span></button>
       <button id="profile-btn" class="avatar" aria-label="Профиль"></button>
-      <div id="global-search-results" class="search-results" aria-live="polite" hidden></div>
     </header>
 
     <main class="main-content">

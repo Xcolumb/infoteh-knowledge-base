@@ -1604,13 +1604,20 @@ function renderInstructions() {
 }
 
 let searchRequest = 0;
-function hideSearch() {
+let searchTimer;
+function dismissSuggestions() {
+  clearTimeout(searchTimer);
   ++searchRequest;
   $('global-search-results').hidden = true;
+}
+
+function hideSearch() {
+  dismissSuggestions();
   $('top-search').classList.remove('expanded');
 }
 
 async function runGlobalSearch() {
+  clearTimeout(searchTimer);
   const query = $('global-search').value.trim();
   const container = $('global-search-results');
 
@@ -1621,6 +1628,8 @@ async function runGlobalSearch() {
     return;
   }
 
+  container.textContent = 'Поиск…';
+  container.scrollTop = 0;
   const data = await apiJsonSafe(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
   if (request !== searchRequest) return;
   if (!data) { container.textContent = 'Не удалось выполнить поиск'; return; }
@@ -1629,7 +1638,7 @@ async function runGlobalSearch() {
   if (!data.data.length) {
     const empty = document.createElement('div');
     empty.className = 'compact-empty';
-    empty.textContent = `Ничего не найдено (движок: ${data.engine})`;
+    empty.textContent = 'Ничего не найдено';
     container.append(empty);
     return;
   }
@@ -2699,7 +2708,7 @@ function setupEventListeners() {
     if (event.key === 'Escape') {
       if ($('task-panel').open) return;
       if (drawer.open) return;
-      if (!$('global-search-results').hidden || $('top-search').classList.contains('expanded')) {
+      if ($('top-search').contains(event.target) || !$('global-search-results').hidden || $('top-search').classList.contains('expanded')) {
         hideSearch();
         $('global-search-btn').focus();
         return;
@@ -2787,7 +2796,25 @@ function setupEventListeners() {
   // Панель
   $('dashboard-refresh').addEventListener('click', loadDashboard);
   $('dashboard-object').addEventListener('change', loadDashboard);
-  $('top-search').addEventListener('submit', (event) => {
+  const searchInput = $('global-search');
+  const searchForm = $('top-search');
+  searchInput.addEventListener('input', () => {
+    dismissSuggestions();
+    if (searchInput.value.trim().length >= 2) searchTimer = setTimeout(runGlobalSearch, 220);
+  });
+  searchForm.addEventListener('focusout', (event) => {
+    if (event.relatedTarget && !searchForm.contains(event.relatedTarget)) hideSearch();
+  });
+  searchForm.addEventListener('keydown', (event) => {
+    if (!['ArrowDown', 'ArrowUp'].includes(event.key) || $('global-search-results').hidden) return;
+    const options = Array.from($('global-search-results').querySelectorAll('.search-result'));
+    if (!options.length) return;
+    event.preventDefault();
+    const current = options.indexOf(document.activeElement);
+    const next = event.key === 'ArrowDown' ? Math.min(current + 1, options.length - 1) : current - 1;
+    (options[next] || searchInput).focus();
+  });
+  searchForm.addEventListener('submit', (event) => {
     event.preventDefault();
     if (window.matchMedia('(max-width: 700px)').matches && !$('top-search').classList.contains('expanded')) {
       $('top-search').classList.add('expanded');
