@@ -1,10 +1,11 @@
+import { fileTransaction } from '../lib/file-transaction.js';
 import express from 'express';
 import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { ok } from '../lib/middleware.js';
 import { assertAdmin, assertManagePto, assertObjectAccess, assertDocumentLink, requirePtoManager, isAdmin, objectScopeClause } from '../lib/permissions.js';
 import { id as parseId, isoDate, oneOf, text } from '../lib/validate.js';
 import { NOTIFICATION_TYPES, REMARK_CLOSED_STATUSES } from '../lib/constants.js';
-import { upload, fileMeta, removeStoredQuietly } from '../lib/files.js';
+import { stagedUpload } from '../lib/files.js';
 import { writeAudit } from '../lib/audit.js';
 import { archiveSourceNotifications, notifyRecipients, recipientsFor } from '../lib/notifications.js';
 
@@ -57,17 +58,20 @@ export function createRemarksRouter({ db }) {
 
   router.post('/remark-statuses', (req, res, next) => {
     try {
-      assertAdmin(req.user);
+      const response = db.transaction(() => {
+        assertAdmin(req.user);
 
-      const name = text(req.body.name, { field: 'Статус', required: true, max: 100 });
-      const closing = req.body.closing === true || req.body.closing === 'true' ? 1 : 0;
-      const order = Number(req.body.order) || 0;
+        const name = text(req.body.name, { field: 'Статус', required: true, max: 100 });
+        const closing = req.body.closing === true || req.body.closing === 'true' ? 1 : 0;
+        const order = Number(req.body.order) || 0;
 
-      db.prepare('INSERT OR IGNORE INTO "Статус_замечания" ("Название", "Порядок", "Закрывающий") VALUES (?, ?, ?)')
-        .run(name, order, closing);
+        db.prepare('INSERT OR IGNORE INTO "Статус_замечания" ("Название", "Порядок", "Закрывающий") VALUES (?, ?, ?)')
+          .run(name, order, closing);
 
-      writeAudit(db, { user: req.user, action: 'Добавление статуса замечания', entity: 'remark-status', result: 'success', ip: req.ip, details: { name } });
-      ok(res, {});
+        writeAudit(db, { user: req.user, action: 'Добавление статуса замечания', entity: 'remark-status', result: 'success', ip: req.ip, details: { name } });
+        return {};
+      }).immediate();
+      ok(res, response);
     } catch (error) {
       next(error);
     }
@@ -253,32 +257,34 @@ export function createRemarksRouter({ db }) {
 
   router.patch('/remarks/:id/status', (req, res, next) => {
     try {
-      assertManagePto(req.user);
-      const id = parseId(req.params.id, { field: 'Замечание' });
-      const remark = getRemark(db, id);
-      assertRemarkAccess(db, req.user, remark);
+      const response = db.transaction(() => {
+        assertManagePto(req.user);
+        const id = parseId(req.params.id, { field: 'Замечание' });
+        const remark = getRemark(db, id);
+        assertRemarkAccess(db, req.user, remark);
 
-      const statusList = statuses(db);
-      const status = oneOf(req.body.status, statusList.map((row) => row.name), { field: 'Статус' });
-      if (status === remark.status) throw badRequest('Замечание уже в этом статусе');
+        const statusList = statuses(db);
+        const status = oneOf(req.body.status, statusList.map((row) => row.name), { field: 'Статус' });
+        if (status === remark.status) throw badRequest('Замечание уже в этом статусе');
 
-      const closing = statusList.find((row) => row.name === status);
+        const closing = statusList.find((row) => row.name === status);
 
-      db.prepare(`
-        UPDATE "Замечание" SET "Статус" = ?, "Дата_закрытия" = ?, "updated_at" = datetime('now', 'localtime')
-        WHERE "ID_замечания" = ?
-      `).run(status, closing && closing.closing ? new Date().toISOString().slice(0, 10) : null, id);
+        db.prepare(`
+          UPDATE "Замечание" SET "Статус" = ?, "Дата_закрытия" = ?, "updated_at" = datetime('now', 'localtime')
+          WHERE "ID_замечания" = ?
+        `).run(status, closing && closing.closing ? new Date().toISOString().slice(0, 10) : null, id);
 
-      addHistory(db, id, 'Смена статуса', {
-        author: req.user.fullName,
-        statusFrom: remark.status,
-        statusTo: status,
-        comment: text(req.body.comment, { field: 'Комментарий', max: 1000 })
-      });
+        addHistory(db, id, 'Смена статуса', {
+          author: req.user.fullName,
+          statusFrom: remark.status,
+          statusTo: status,
+          comment: text(req.body.comment, { field: 'Комментарий', max: 1000 })
+        });
 
-      writeAudit(db, { user: req.user, action: 'Смена статуса замечания', entity: 'remark', entityId: id, objectId: remark.objectId, result: 'success', ip: req.ip, details: { from: remark.status, to: status } });
-
-      ok(res, {});
+        writeAudit(db, { user: req.user, action: 'Смена статуса замечания', entity: 'remark', entityId: id, objectId: remark.objectId, result: 'success', ip: req.ip, details: { from: remark.status, to: status } });
+        return {};
+      }).immediate();
+      ok(res, response);
     } catch (error) {
       next(error);
     }
@@ -286,26 +292,27 @@ export function createRemarksRouter({ db }) {
 
   router.post('/remarks/:id/comments', (req, res, next) => {
     try {
-      const id = parseId(req.params.id, { field: 'Замечание' });
-      const remark = getRemark(db, id);
-      assertRemarkAccess(db, req.user, remark);
+      const response = db.transaction(() => {
+        const id = parseId(req.params.id, { field: 'Замечание' });
+        const remark = getRemark(db, id);
+        assertRemarkAccess(db, req.user, remark);
 
-      const comment = text(req.body.text, { field: 'Комментарий', required: true, max: 2000 });
+        const comment = text(req.body.text, { field: 'Комментарий', required: true, max: 2000 });
 
-      db.prepare('INSERT INTO "Комментарий_замечания" ("ID_замечания", "Текст", "Автор", "Создано") VALUES (?, ?, ?, datetime(\'now\', \'localtime\'))')
-        .run(id, comment, req.user.fullName);
+        db.prepare('INSERT INTO "Комментарий_замечания" ("ID_замечания", "Текст", "Автор", "Создано") VALUES (?, ?, ?, datetime(\'now\', \'localtime\'))')
+          .run(id, comment, req.user.fullName);
 
-      addHistory(db, id, 'Комментарий', { author: req.user.fullName, comment });
-
-      ok(res, {});
+        addHistory(db, id, 'Комментарий', { author: req.user.fullName, comment });
+        return {};
+      }).immediate();
+      ok(res, response);
     } catch (error) {
       next(error);
     }
   });
 
-  router.post('/remarks/:id/attachments', requirePtoManager, upload.single('file'), asyncHandler(async (req, res) => {
-    const meta = fileMeta(req.file);
-    try {
+  router.post('/remarks/:id/attachments', requirePtoManager, stagedUpload.single('file'), asyncHandler(async (req, res) => {
+    const result = fileTransaction(db, req.file, (meta, retire) => {
       const id = parseId(req.params.id, { field: 'Замечание' });
       const remark = getRemark(db, id);
       assertRemarkAccess(db, req.user, remark);
@@ -320,15 +327,14 @@ export function createRemarksRouter({ db }) {
 
       writeAudit(db, { user: req.user, action: 'Вложение к замечанию', entity: 'remark', entityId: id, objectId: remark.objectId, result: 'success', ip: req.ip });
 
-      ok(res, {});
-    } catch (error) {
-      if (meta) removeStoredQuietly(meta.storedPath);
-      throw error;
-    }
+      return {};
+    });
+    ok(res, result);
   }));
 
   router.delete('/remarks/:id', (req, res, next) => {
     try {
+      fileTransaction(db, null, (meta, retire) => {
       assertManagePto(req.user);
       const id = parseId(req.params.id, { field: 'Замечание' });
       const remark = getRemark(db, id);
@@ -341,10 +347,11 @@ export function createRemarksRouter({ db }) {
       const attachments = db.prepare('SELECT "Файл" as file FROM "Вложение_замечания" WHERE "ID_замечания" = ?').all(id);
 
       db.prepare('DELETE FROM "Замечание" WHERE "ID_замечания" = ?').run(id);
-      for (const attachment of attachments) removeStoredQuietly(attachment.file);
+      for (const attachment of attachments) retire(attachment.file);
 
       writeAudit(db, { user: req.user, action: 'Удаление замечания', entity: 'remark', entityId: id, objectId: remark.objectId, result: 'success', ip: req.ip });
 
+      });
       ok(res, {});
     } catch (error) {
       next(error);

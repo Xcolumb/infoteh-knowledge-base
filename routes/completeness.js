@@ -100,22 +100,24 @@ export function createCompletenessRouter({ db }) {
 
   router.post('/completeness', (req, res, next) => {
     try {
-      assertManagePto(req.user);
-      const name = text(req.body.name, { field: 'Название', required: true, max: 200 });
-      const objectId = req.body.objectId ? parseId(req.body.objectId, { field: 'Объект' }) : null;
-      const responsible = text(req.body.responsible, { field: 'Ответственный', max: 150 });
-      const note = text(req.body.note, { field: 'Примечание', max: 1000 });
+      const response = db.transaction(() => {
+        assertManagePto(req.user);
+        const name = text(req.body.name, { field: 'Название', required: true, max: 200 });
+        const objectId = req.body.objectId ? parseId(req.body.objectId, { field: 'Объект' }) : null;
+        const responsible = text(req.body.responsible, { field: 'Ответственный', max: 150 });
+        const note = text(req.body.note, { field: 'Примечание', max: 1000 });
 
-      assertObjectAccess(db, req.user, objectId);
+        assertObjectAccess(db, req.user, objectId);
 
-      const result = db.prepare(`
-        INSERT INTO "Комплект" ("Название", "ID_объекта", "Ответственный", "Примечание", "Активен", "Создано", "updated_at")
-        VALUES (?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
-      `).run(name, objectId, responsible, note);
+        const result = db.prepare(`
+          INSERT INTO "Комплект" ("Название", "ID_объекта", "Ответственный", "Примечание", "Активен", "Создано", "updated_at")
+          VALUES (?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
+        `).run(name, objectId, responsible, note);
 
-      writeAudit(db, { user: req.user, action: 'Создание комплекта ИД', entity: 'completeness', entityId: result.lastInsertRowid, objectId, result: 'success', ip: req.ip });
-
-      ok(res, { data: { id: result.lastInsertRowid } });
+        writeAudit(db, { user: req.user, action: 'Создание комплекта ИД', entity: 'completeness', entityId: result.lastInsertRowid, objectId, result: 'success', ip: req.ip });
+        return { data: { id: result.lastInsertRowid } };
+      }).immediate();
+      ok(res, response);
     } catch (error) {
       next(error);
     }
@@ -170,15 +172,17 @@ export function createCompletenessRouter({ db }) {
 
   router.delete('/completeness/:id', (req, res, next) => {
     try {
-      assertManagePto(req.user);
-      const id = parseId(req.params.id, { field: 'Комплект' });
-      const set = getSet(db, req.user, id);
+      const response = db.transaction(() => {
+        assertManagePto(req.user);
+        const id = parseId(req.params.id, { field: 'Комплект' });
+        const set = getSet(db, req.user, id);
 
-      db.prepare('DELETE FROM "Комплект" WHERE "ID_комплекта" = ?').run(id);
+        db.prepare('DELETE FROM "Комплект" WHERE "ID_комплекта" = ?').run(id);
 
-      writeAudit(db, { user: req.user, action: 'Удаление комплекта ИД', entity: 'completeness', entityId: id, objectId: set.objectId, result: 'success', ip: req.ip });
-
-      ok(res, {});
+        writeAudit(db, { user: req.user, action: 'Удаление комплекта ИД', entity: 'completeness', entityId: id, objectId: set.objectId, result: 'success', ip: req.ip });
+        return {};
+      }).immediate();
+      ok(res, response);
     } catch (error) {
       next(error);
     }
@@ -186,25 +190,27 @@ export function createCompletenessRouter({ db }) {
 
   router.post('/completeness/:id/requirements', (req, res, next) => {
     try {
-      assertManagePto(req.user);
-      const id = parseId(req.params.id, { field: 'Комплект' });
-      const set = getSet(db, req.user, id);
+      const response = db.transaction(() => {
+        assertManagePto(req.user);
+        const id = parseId(req.params.id, { field: 'Комплект' });
+        const set = getSet(db, req.user, id);
 
-      const name = text(req.body.name, { field: 'Название требования', required: true, max: 300 });
-      const type = req.body.type ? oneOf(req.body.type, PTO_TYPES, { field: 'Тип документа' }) : null;
-      const required = req.body.required === false || req.body.required === 'false' ? 0 : 1;
-      const sortOrder = Number(req.body.sortOrder) || 0;
+        const name = text(req.body.name, { field: 'Название требования', required: true, max: 300 });
+        const type = req.body.type ? oneOf(req.body.type, PTO_TYPES, { field: 'Тип документа' }) : null;
+        const required = req.body.required === false || req.body.required === 'false' ? 0 : 1;
+        const sortOrder = Number(req.body.sortOrder) || 0;
 
-      const result = db.prepare(`
-        INSERT INTO "Требование_комплекта" ("ID_комплекта", "Название", "Тип_документа", "Обязательно", "Порядок")
-        VALUES (?, ?, ?, ?, ?)
-      `).run(id, name, type, required, sortOrder);
+        const result = db.prepare(`
+          INSERT INTO "Требование_комплекта" ("ID_комплекта", "Название", "Тип_документа", "Обязательно", "Порядок")
+          VALUES (?, ?, ?, ?, ?)
+        `).run(id, name, type, required, sortOrder);
 
-      db.prepare('UPDATE "Комплект" SET "updated_at" = datetime(\'now\', \'localtime\') WHERE "ID_комплекта" = ?').run(id);
+        db.prepare('UPDATE "Комплект" SET "updated_at" = datetime(\'now\', \'localtime\') WHERE "ID_комплекта" = ?').run(id);
 
-      writeAudit(db, { user: req.user, action: 'Добавление требования комплекта', entity: 'completeness', entityId: id, objectId: set.objectId, result: 'success', ip: req.ip, details: { name } });
-
-      ok(res, { data: { id: result.lastInsertRowid } });
+        writeAudit(db, { user: req.user, action: 'Добавление требования комплекта', entity: 'completeness', entityId: id, objectId: set.objectId, result: 'success', ip: req.ip, details: { name } });
+        return { data: { id: result.lastInsertRowid } };
+      }).immediate();
+      ok(res, response);
     } catch (error) {
       next(error);
     }
@@ -212,27 +218,29 @@ export function createCompletenessRouter({ db }) {
 
   router.put('/completeness/requirements/:requirementId', (req, res, next) => {
     try {
-      assertManagePto(req.user);
-      const requirementId = parseId(req.params.requirementId, { field: 'Требование' });
+      const response = db.transaction(() => {
+        assertManagePto(req.user);
+        const requirementId = parseId(req.params.requirementId, { field: 'Требование' });
 
-      const requirement = db.prepare('SELECT "ID_комплекта" as setId, "Название" as name FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
-      if (!requirement) throw notFound();
+        const requirement = db.prepare('SELECT "ID_комплекта" as setId, "Название" as name FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
+        if (!requirement) throw notFound();
 
-      getSet(db, req.user, requirement.setId);
+        getSet(db, req.user, requirement.setId);
 
-      const name = text(req.body.name, { field: 'Название требования', required: true, max: 300 });
-      const type = req.body.type ? oneOf(req.body.type, PTO_TYPES, { field: 'Тип документа' }) : null;
-      const required = req.body.required === false || req.body.required === 'false' ? 0 : 1;
-      const sortOrder = Number(req.body.sortOrder) || 0;
+        const name = text(req.body.name, { field: 'Название требования', required: true, max: 300 });
+        const type = req.body.type ? oneOf(req.body.type, PTO_TYPES, { field: 'Тип документа' }) : null;
+        const required = req.body.required === false || req.body.required === 'false' ? 0 : 1;
+        const sortOrder = Number(req.body.sortOrder) || 0;
 
-      db.prepare(`
-        UPDATE "Требование_комплекта" SET "Название" = ?, "Тип_документа" = ?, "Обязательно" = ?, "Порядок" = ?
-        WHERE "ID_требования" = ?
-      `).run(name, type, required, sortOrder, requirementId);
+        db.prepare(`
+          UPDATE "Требование_комплекта" SET "Название" = ?, "Тип_документа" = ?, "Обязательно" = ?, "Порядок" = ?
+          WHERE "ID_требования" = ?
+        `).run(name, type, required, sortOrder, requirementId);
 
-      writeAudit(db, { user: req.user, action: 'Изменение требования комплекта', entity: 'completeness', entityId: requirement.setId, result: 'success', ip: req.ip });
-
-      ok(res, {});
+        writeAudit(db, { user: req.user, action: 'Изменение требования комплекта', entity: 'completeness', entityId: requirement.setId, result: 'success', ip: req.ip });
+        return {};
+      }).immediate();
+      ok(res, response);
     } catch (error) {
       next(error);
     }
@@ -240,19 +248,21 @@ export function createCompletenessRouter({ db }) {
 
   router.delete('/completeness/requirements/:requirementId', (req, res, next) => {
     try {
-      assertManagePto(req.user);
-      const requirementId = parseId(req.params.requirementId, { field: 'Требование' });
+      const response = db.transaction(() => {
+        assertManagePto(req.user);
+        const requirementId = parseId(req.params.requirementId, { field: 'Требование' });
 
-      const requirement = db.prepare('SELECT "ID_комплекта" as setId FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
-      if (!requirement) throw notFound();
+        const requirement = db.prepare('SELECT "ID_комплекта" as setId FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
+        if (!requirement) throw notFound();
 
-      getSet(db, req.user, requirement.setId);
+        getSet(db, req.user, requirement.setId);
 
-      db.prepare('DELETE FROM "Требование_комплекта" WHERE "ID_требования" = ?').run(requirementId);
+        db.prepare('DELETE FROM "Требование_комплекта" WHERE "ID_требования" = ?').run(requirementId);
 
-      writeAudit(db, { user: req.user, action: 'Удаление требования комплекта', entity: 'completeness', entityId: requirement.setId, result: 'success', ip: req.ip });
-
-      ok(res, {});
+        writeAudit(db, { user: req.user, action: 'Удаление требования комплекта', entity: 'completeness', entityId: requirement.setId, result: 'success', ip: req.ip });
+        return {};
+      }).immediate();
+      ok(res, response);
     } catch (error) {
       next(error);
     }
@@ -285,24 +295,26 @@ export function createCompletenessRouter({ db }) {
 
   router.delete('/completeness/requirements/:requirementId/documents/:documentId', (req, res, next) => {
     try {
-      assertManagePto(req.user);
-      const requirementId = parseId(req.params.requirementId, { field: 'Требование' });
-      const documentId = parseId(req.params.documentId, { field: 'Документ' });
+      const response = db.transaction(() => {
+        assertManagePto(req.user);
+        const requirementId = parseId(req.params.requirementId, { field: 'Требование' });
+        const documentId = parseId(req.params.documentId, { field: 'Документ' });
 
-      const requirement = db.prepare('SELECT "ID_комплекта" as setId FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
-      if (!requirement) throw notFound();
+        const requirement = db.prepare('SELECT "ID_комплекта" as setId FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
+        if (!requirement) throw notFound();
 
-      const set = getSet(db, req.user, requirement.setId);
+        const set = getSet(db, req.user, requirement.setId);
 
-      // Администратор может вручную отвязать исторически несовместимый документ.
-      if (!isAdmin(req.user)) assertDocumentLink(db, req.user, documentId, set.objectId);
-      const result = db.prepare('DELETE FROM "Документ_комплекта" WHERE "ID_требования" = ? AND "ID_документа" = ?').run(requirementId, documentId);
+        // Администратор может вручную отвязать исторически несовместимый документ.
+        if (!isAdmin(req.user)) assertDocumentLink(db, req.user, documentId, set.objectId);
+        const result = db.prepare('DELETE FROM "Документ_комплекта" WHERE "ID_требования" = ? AND "ID_документа" = ?').run(requirementId, documentId);
 
-      if (!result.changes) throw notFound();
+        if (!result.changes) throw notFound();
 
-      writeAudit(db, { user: req.user, action: 'Отвязка документа от комплекта', entity: 'completeness', entityId: requirement.setId, result: 'success', ip: req.ip, details: { documentId } });
-
-      ok(res, {});
+        writeAudit(db, { user: req.user, action: 'Отвязка документа от комплекта', entity: 'completeness', entityId: requirement.setId, result: 'success', ip: req.ip, details: { documentId } });
+        return {};
+      }).immediate();
+      ok(res, response);
     } catch (error) {
       next(error);
     }

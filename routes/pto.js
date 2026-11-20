@@ -1,10 +1,13 @@
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import { fileTransaction } from '../lib/file-transaction.js';
 import express from 'express';
 import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { ok } from '../lib/middleware.js';
 import { assertManagePto, assertObjectAccess, requirePtoManager, isAdmin, objectScopeClause } from '../lib/permissions.js';
 import { id as parseId, isoDate, oneOf, text } from '../lib/validate.js';
 import { PTO_CLOSED_STATUSES, PTO_STATUSES, PTO_TYPES } from '../lib/constants.js';
-import { upload, fileMeta, removeStoredQuietly } from '../lib/files.js';
+import { stagedUpload, resolveStoredPath } from '../lib/files.js';
 import { ensureDocumentText, indexDocument, removeIndex } from '../lib/search.js';
 import { writeAudit } from '../lib/audit.js';
 import { archiveSourceNotifications, notifyRecipients, notifyStatusChange, recipientsFor } from '../lib/notifications.js';
@@ -46,6 +49,29 @@ function addHistory(db, documentId, action, { author = null, statusFrom = null, 
     INSERT INTO "История_ПТО" ("ID_документа", "Дата", "Автор", "Действие", "Статус_был", "Статус_стал", "Версия", "Комментарий")
     VALUES (?, datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?)
   `).run(documentId, author, action, statusFrom, statusTo, version, comment);
+}
+
+function documentChange(db, req, change) {
+  const key = req.get('Idempotency-Key');
+  if (!key) return fileTransaction(db, req.file, change);
+  if (!/^[\w-]{1,100}$/.test(key)) throw badRequest('Некорректный ключ операции');
+  const hash = createHash('sha256');
+  hash.update(JSON.stringify([req.method,req.params.id || null,Object.entries(req.body).sort(),req.file?.originalname]));
+  if (req.file) hash.update(req.file.buffer);
+  const fingerprint = hash.digest('hex');
+  return fileTransaction(db,req.file,meta => {
+    const previous = db.prepare('SELECT * FROM Операция_документа WHERE employee=? AND token=?').get(req.user.id,key);
+    if (previous) {
+      const doc = getDoc(db,previous.document);
+      assertDocAccess(db,req.user,doc);
+      if (previous.fingerprint !== fingerprint) throw conflict('Этот ключ уже использован для другой операции');
+      return JSON.parse(previous.response);
+    }
+    const response = change(meta);
+    db.prepare('INSERT INTO Операция_документа(employee,token,document,fingerprint,response) VALUES (?,?,?,?,?)')
+      .run(req.user.id,key,response.data.id,fingerprint,JSON.stringify(response));
+    return response;
+  });
 }
 
 function addRevision(db, documentId, { version, file, originalName, size, mime, comment, author }) {
@@ -318,9 +344,8 @@ export function createPtoRouter({ db }) {
     }
   });
 
-  router.post('/pto', requirePtoManager, upload.single('docFile'), asyncHandler(async (req, res) => {
-    const meta = fileMeta(req.file);
-    try {
+  router.post('/pto', requirePtoManager, stagedUpload.single('docFile'), asyncHandler(async (req, res) => {
+    const result = documentChange(db, req, (meta) => {
       const fields = parseDocFields(req.body);
       assertObjectAccess(db, req.user, fields.objectId);
 
@@ -377,17 +402,13 @@ export function createPtoRouter({ db }) {
         details: { type: fields.type, title: fields.title }
       });
 
-      ok(res, { data: { id: documentId } });
-    } catch (error) {
-      if (meta) removeStoredQuietly(meta.storedPath);
-      throw error;
-    }
+      return { data: { id: documentId } };
+    });
+    ok(res, result);
   }));
 
-  router.put('/pto/:id', requirePtoManager, upload.single('docFile'), asyncHandler(async (req, res) => {
-    const meta = fileMeta(req.file);
-    try {
-      const updated = db.transaction(() => {
+  router.put('/pto/:id', requirePtoManager, stagedUpload.single('docFile'), asyncHandler(async (req, res) => {
+    const result = documentChange(db, req, (meta) => {
         const id = parseId(req.params.id, { field: 'Документ' });
         const existing = getDoc(db, id);
         assertDocAccess(db, req.user, existing);
@@ -406,6 +427,7 @@ export function createPtoRouter({ db }) {
           archiveSourceNotifications(db, `pto:${id}`);
         }
 
+        if (!meta && existing.filePath && !fs.existsSync(resolveStoredPath(existing.filePath))) throw conflict('Отсутствует файл документа');
         const newRevision = Boolean(meta) || String(req.body.newRevision || '') === 'true';
         const version = newRevision ? Number(existing.version || 1) + 1 : Number(existing.version || 1);
         const statusChanged = existing.status !== fields.status;
@@ -447,7 +469,7 @@ export function createPtoRouter({ db }) {
         if (newRevision) {
           addRevision(db, id, {
             version,
-            file: meta ? meta.storedPath : null,
+            file: meta ? meta.storedPath : existing.filePath,
             originalName: meta ? meta.originalName : existing.originalName,
             size: meta ? meta.size : existing.size,
             mime: meta ? meta.mime : existing.mime,
@@ -480,18 +502,14 @@ export function createPtoRouter({ db }) {
           details: { version, statusChanged, newRevision }
         });
 
-        return { id, version };
-      }).immediate();
-      ok(res, { data: updated });
-
-    } catch (error) {
-      if (meta) removeStoredQuietly(meta.storedPath);
-      throw error;
-    }
+        return { data: { id, version } };
+    });
+    ok(res, result);
   }));
 
   router.patch('/pto/:id/status', (req, res, next) => {
     try {
+      fileTransaction(db, null, (meta, retire) => {
       assertManagePto(req.user);
       const id = parseId(req.params.id, { field: 'Документ' });
       const status = oneOf(req.body.status, PTO_STATUSES, { field: 'Статус' });
@@ -534,6 +552,7 @@ export function createPtoRouter({ db }) {
         details: { from: existing.status, to: status }
       });
 
+      });
       ok(res, {});
     } catch (error) {
       next(error);
@@ -542,6 +561,7 @@ export function createPtoRouter({ db }) {
 
   router.delete('/pto/:id', (req, res, next) => {
     try {
+      fileTransaction(db, null, (meta, retire) => {
       assertManagePto(req.user);
       const id = parseId(req.params.id, { field: 'Документ' });
 
@@ -557,7 +577,7 @@ export function createPtoRouter({ db }) {
 
       db.prepare('DELETE FROM "Документ_ПТО" WHERE "ID_документа" = ?').run(id);
 
-      for (const file of files) removeStoredQuietly(file);
+      for (const file of files) retire(file);
       removeIndex(db, 'document', id);
 
       writeAudit(db, {
@@ -571,6 +591,7 @@ export function createPtoRouter({ db }) {
         details: { title: existing.title, files: files.size }
       });
 
+      });
       ok(res, {});
     } catch (error) {
       next(error);

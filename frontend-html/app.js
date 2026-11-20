@@ -1407,6 +1407,8 @@ async function openPtoForm(id) {
     </form>
   `);
 
+  let operationKey = Array.from(crypto.getRandomValues(new Uint32Array(4))).join('-');
+  $('pto-doc-form').addEventListener('input', () => { operationKey = Array.from(crypto.getRandomValues(new Uint32Array(4))).join('-'); });
   $('pto-doc-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const errorEl = $('pto-form-error');
@@ -1431,6 +1433,7 @@ async function openPtoForm(id) {
     try {
       const result = await apiJson(doc ? `${API_BASE}/pto/${doc.id}` : `${API_BASE}/pto`, {
         method: doc ? 'PUT' : 'POST',
+        headers: { 'Idempotency-Key': operationKey },
         body: formData
       });
 

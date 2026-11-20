@@ -1,3 +1,4 @@
+import { fileTransaction } from '../lib/file-transaction.js';
 import express from 'express';
 import path from 'path';
 import { asyncHandler } from '../lib/errors.js';
@@ -5,7 +6,7 @@ import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { ok } from '../lib/middleware.js';
 import { assertAdmin, assertManageContent, canManageContent } from '../lib/permissions.js';
 import { id as parseId, text } from '../lib/validate.js';
-import { upload, fileMeta, removeStoredQuietly } from '../lib/files.js';
+import { stagedUpload } from '../lib/files.js';
 import { indexArticle, removeIndex } from '../lib/search.js';
 import { writeAudit } from '../lib/audit.js';
 
@@ -204,16 +205,14 @@ export function createCatalogRouter({ db }) {
     }
   });
 
-  router.post('/articles', upload.single('pdfFile'), asyncHandler(async (req, res) => {
-    assertManageContent(req.user);
+  router.post('/articles', (req,res,next) => { assertManageContent(req.user); next(); }, stagedUpload.single('pdfFile'), asyncHandler(async (req, res) => {
+    const result = fileTransaction(db, req.file, (meta, retire) => {
 
     const title = text(req.body.title, { field: 'Название', required: true, max: 300 });
     const rabotaId = parseId(req.body.rabotaId, { field: 'Работа' });
     const keywords = text(req.body.keywords, { field: 'Ключевые слова', max: 500 });
     const content = text(req.body.content, { field: 'Текст статьи', required: true, max: 100000 });
-    const meta = fileMeta(req.file);
 
-    try {
       if (!db.prepare('SELECT 1 FROM "Работа" WHERE "ID_работы" = ?').get(rabotaId)) throw badRequest('Работа не найдена');
 
       const result = db.prepare(`
@@ -233,24 +232,20 @@ export function createCatalogRouter({ db }) {
 
       writeAudit(db, { user: req.user, action: 'Создание статьи', entity: 'article', entityId: result.lastInsertRowid, result: 'success', ip: req.ip });
 
-      ok(res, { data: { id: result.lastInsertRowid, title, publishDate: todayIso() } });
-    } catch (error) {
-      if (meta) removeStoredQuietly(meta.storedPath);
-      throw error;
-    }
+      return { data: { id: result.lastInsertRowid, title, publishDate: todayIso() } };
+    });
+    ok(res, result);
   }));
 
-  router.put('/articles/:id', upload.single('pdfFile'), asyncHandler(async (req, res) => {
-    assertManageContent(req.user);
+  router.put('/articles/:id', (req,res,next) => { assertManageContent(req.user); next(); }, stagedUpload.single('pdfFile'), asyncHandler(async (req, res) => {
+    const result = fileTransaction(db, req.file, (meta, retire) => {
 
     const id = parseId(req.params.id, { field: 'Статья' });
     const title = text(req.body.title, { field: 'Название', required: true, max: 300 });
     const rabotaId = parseId(req.body.rabotaId, { field: 'Работа' });
     const keywords = text(req.body.keywords, { field: 'Ключевые слова', max: 500 });
     const content = text(req.body.content, { field: 'Текст статьи', required: true, max: 100000 });
-    const meta = fileMeta(req.file);
 
-    try {
       const existing = db.prepare('SELECT "Файл" as file FROM "Статья" WHERE "ID_статьи" = ?').get(id);
       if (!existing) throw notFound('Статья не найдена');
       if (!db.prepare('SELECT 1 FROM "Работа" WHERE "ID_работы" = ?').get(rabotaId)) throw badRequest('Работа не найдена');
@@ -271,23 +266,22 @@ export function createCatalogRouter({ db }) {
       );
 
       if (meta && existing.file && existing.file !== meta.storedPath) {
-        removeStoredQuietly(existing.file);
+        retire(existing.file);
       }
 
       indexArticle(db, id);
 
       writeAudit(db, { user: req.user, action: 'Изменение статьи', entity: 'article', entityId: id, result: 'success', ip: req.ip });
 
-      ok(res, { data: { id } });
-    } catch (error) {
-      if (meta) removeStoredQuietly(meta.storedPath);
-      throw error;
-    }
+      return { data: { id } };
+    });
+    ok(res, result);
   }));
 
   // Удаление статьи: только администратор — так же, как в интерфейсе.
   router.delete('/articles/:id', (req, res, next) => {
     try {
+      fileTransaction(db, null, (meta, retire) => {
       assertAdmin(req.user);
       const id = parseId(req.params.id, { field: 'Статья' });
 
@@ -295,11 +289,12 @@ export function createCatalogRouter({ db }) {
       if (!existing) throw notFound('Статья не найдена');
 
       db.prepare('DELETE FROM "Статья" WHERE "ID_статьи" = ?').run(id);
-      if (existing.file) removeStoredQuietly(existing.file);
+      if (existing.file) retire(existing.file);
       removeIndex(db, 'article', id);
 
       writeAudit(db, { user: req.user, action: 'Удаление статьи', entity: 'article', entityId: id, result: 'success', ip: req.ip });
 
+      });
       ok(res, {});
     } catch (error) {
       next(error);

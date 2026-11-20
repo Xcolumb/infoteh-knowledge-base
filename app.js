@@ -1,3 +1,4 @@
+import { recoverFiles } from './lib/file-transaction.js';
 import express from 'express';
 import session from 'express-session';
 import path from 'path';
@@ -28,6 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApp({ db = openDatabase(), cfg = config } = {}) {
   ensureUploadsDir();
+  recoverFiles(db);
 
   const app = express();
   app.set('trust proxy', cfg.trustProxy);
