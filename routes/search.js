@@ -31,6 +31,7 @@ export function createSearchRouter({ db }) {
         id: Number(row.id),
         title: row.title,
         fragment: row.fragment,
+        highlights: row.highlights,
         objectId: row.objectId === '' || row.objectId === null ? null : Number(row.objectId),
         openUrl: row.kind === 'document' ? `/api/files/document/${row.id}` : null
       }))

@@ -1553,13 +1553,41 @@ async function runGlobalSearch() {
   const data = await apiJsonSafe(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
   if (!data) return;
 
-  container.innerHTML = data.data.length
-    ? data.data.map((item) => `
-        <button class="search-result" onclick="${item.kind === 'document' ? `openPtoDoc(${item.id})` : `openArticleModal(${item.id})`}">
-          ${item.title}
-          <span class="search-kind">${item.kind === 'document' ? 'Документ ПТО' : 'Инструкция'}${item.fragment ? ' · ' + (item.fragment || '') : ''}</span>
-        </button>`).join('')
-    : `<div class="compact-empty">Ничего не найдено (движок: ${data.engine})</div>`;
+  container.replaceChildren();
+  if (!data.data.length) {
+    const empty = document.createElement('div');
+    empty.className = 'compact-empty';
+    empty.textContent = `Ничего не найдено (движок: ${data.engine})`;
+    container.append(empty);
+    return;
+  }
+
+  for (const item of data.data) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'search-result';
+    button.textContent = item.title;
+    const isDocument = item.kind === 'document';
+    button.addEventListener('click', () => isDocument ? openPtoDoc(item.id) : openArticleModal(item.id));
+
+    const detail = document.createElement('span');
+    detail.className = 'search-kind';
+    detail.textContent = isDocument ? 'Документ ПТО' : 'Инструкция';
+    if (item.fragment) {
+      detail.append(' · ');
+      let cursor = 0;
+      for (const [start, end] of item.highlights || []) {
+        detail.append(item.fragment.slice(cursor, start));
+        const mark = document.createElement('mark');
+        mark.textContent = item.fragment.slice(start, end);
+        detail.append(mark);
+        cursor = end;
+      }
+      detail.append(item.fragment.slice(cursor));
+    }
+    button.append(detail);
+    container.append(button);
+  }
 }
 
 // --- Комплектность ИД ---
