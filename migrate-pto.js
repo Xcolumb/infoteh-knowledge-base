@@ -1,12 +1,11 @@
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
-import { openDatabase } from './lib/db.js';
+import config from './config.js';
+import { demoPassword, requireDemoEnvironment } from './lib/demo.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const dbPath = path.join(__dirname, 'infoteh.db');
+requireDemoEnvironment();
+const dbPath = config.databasePath;
 
 if (!fs.existsSync(dbPath)) {
   console.error(`База infoteh.db не найдена: ${dbPath}`);
@@ -16,7 +15,12 @@ if (!fs.existsSync(dbPath)) {
 
 // Схема модуля ПТО создаётся централизованными миграциями (lib/migrations/index.js),
 // скрипт только добавляет демонстрационные данные.
-const db = openDatabase({ file: dbPath });
+const db = new Database(dbPath, { fileMustExist: true });
+db.pragma('foreign_keys = ON');
+if (db.prepare('SELECT 1 FROM "Сотрудник" WHERE "Демо" = 0 LIMIT 1').get()) {
+  db.close();
+  throw new Error('Демонаполнение ПТО разрешено только в демонстрационной базе');
+}
 
 const pad = (value) => String(value).padStart(2, '0');
 
@@ -41,25 +45,15 @@ let ptoUserId;
 
 if (ptoExists) {
   ptoUserId = ptoExists.ID_сотрудника;
-  console.log(`Сотрудник ${ptoTabNumber} уже существует (ID ${ptoUserId})`);
 } else {
-  // Пароль демонстрационной учётной записи задаётся переменной окружения,
-  // значение по умолчанию используется только для локального демо.
-  const demoPassword = process.env.SEED_PTO_PASSWORD || 'pto123';
   const result = db
     .prepare(`
       INSERT INTO "Сотрудник" ("Табельный_номер", "Пароль", "ФИО", "Должность", "Демо")
       VALUES (?, ?, ?, ?, 1)
     `)
-    .run(ptoTabNumber, bcrypt.hashSync(demoPassword, 10), 'Соколов Дмитрий Андреевич', 'Инженер ПТО');
+    .run(ptoTabNumber, bcrypt.hashSync(demoPassword('SEED_PTO_PASSWORD'), 10), 'Соколов Дмитрий Андреевич', 'Инженер ПТО');
   ptoUserId = result.lastInsertRowid;
-  console.log(`Добавлен сотрудник ПТО (${ptoTabNumber}), пароль — из SEED_PTO_PASSWORD или демо-значение`);
 }
-
-db.prepare('UPDATE "Сотрудник" SET "Демо" = 1 WHERE "Табельный_номер" = ?').run(ptoTabNumber);
-
-const admin = db.prepare('SELECT "ID_сотрудника" FROM "Сотрудник" WHERE "Должность" = ?').get('Администратор');
-const adminId = admin ? admin.ID_сотрудника : ptoUserId;
 
 // === Объекты ===============================================================
 
@@ -342,8 +336,5 @@ console.log('Готово. Итоги:');
 console.log(`  Объекты: ${totals.objects}`);
 console.log(`  Документы ПТО: ${totals.documents}`);
 console.log(`  Записи истории: ${totals.history}`);
-console.log('');
-console.log('Вход для проверки: табельный номер PTO01, пароль pto123');
-console.log('Не забудьте обновить демо-данные в README.');
 
 db.close();

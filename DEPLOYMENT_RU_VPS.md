@@ -116,14 +116,20 @@ sudo -u infoteh -H bash -c 'cd /opt/infoteh && mkdir -p uploads backups logs && 
 sudo -u infoteh -H bash -c 'cd /opt/infoteh && npm run migrate'
 ```
 
-Если требуется демонстрационное наполнение (только для тестового стенда):
+Создайте первоначального администратора после миграций, пока в базе нет сотрудников. Выполните в Bash от имени пользователя сервиса в каталоге приложения. Переменные существуют только в дочерней оболочке. При вводе пароль скрыт.
 
 ```bash
-sudo -u infoteh -H bash -c 'cd /opt/infoteh && npm run seed'
-sudo -u infoteh -H bash -c 'cd /opt/infoteh && npm run migrate-pto'
+(
+  read -rp 'Табельный номер: ' INIT_ADMIN_TAB
+  read -rp 'ФИО: ' INIT_ADMIN_NAME
+  read -rsp 'Пароль администратора: ' INIT_ADMIN_PASSWORD
+  echo
+  export INIT_ADMIN_TAB INIT_ADMIN_NAME INIT_ADMIN_PASSWORD
+  npm run init-admin
+)
 ```
 
-В production демо-учётные записи будут заблокированы (`ALLOW_DEMO_ACCOUNTS=0`).
+Первый вход выполняется через обычную форму. Для существующей установки управление сотрудниками доступно через администратора. Настройка отдельного демостенда описана в README.md.
 
 ---
 

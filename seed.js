@@ -1,24 +1,18 @@
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { openDatabase } from './lib/db.js';
+import { demoPassword, requireDemoEnvironment } from './lib/demo.js';
+import config from './config.js';
 import bcrypt from 'bcryptjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const dbPath = path.join(__dirname, 'infoteh.db');
-const force = process.argv.includes('--force');
-
-if (fs.existsSync(dbPath) && !force) {
-  console.log(`База уже существует: ${dbPath}`);
-  console.log('Наполнение пропущено, чтобы не потерять данные.');
-  console.log('Пересоздать базу: npm run seed -- --force');
-  process.exit(0);
-}
-
-if (fs.existsSync(dbPath) && force) {
-  fs.rmSync(dbPath);
-  console.log('Старая база удалена.');
+requireDemoEnvironment();
+const dbPath = config.databasePath;
+// Исключаем перезапись базы, в том числе при одновременном старте двух seed.
+try {
+  fs.closeSync(fs.openSync(dbPath, 'wx'));
+} catch (error) {
+  if (error.code !== 'EEXIST') throw error;
+  console.log('База уже существует. Для нового демостенда укажите свободный DATABASE_PATH.');
+  process.exit(process.argv.includes('--force') ? 1 : 0);
 }
 
 // Схема БД создаётся централизованно миграциями (lib/migrations),
@@ -38,9 +32,9 @@ function dateTime(daysAgo, hour = 10, minute = 0) {
 }
 
 const employees = [
-  { tabNumber: 'ADM002', password: 'admin', fullName: 'Волкова Елена Игоревна', role: 'Администратор' },
-  { tabNumber: 'SM002', password: 'qwerty', fullName: 'Орлов Максим Сергеевич', role: 'Старший монтажник' },
-  { tabNumber: 'M002', password: '12345', fullName: 'Кузнецов Алексей Дмитриевич', role: 'Монтажник' }
+  { tabNumber: 'ADM002', passwordVariable: 'SEED_ADMIN_PASSWORD', fullName: 'Волкова Елена Игоревна', role: 'Администратор' },
+  { tabNumber: 'SM002', passwordVariable: 'SEED_SENIOR_PASSWORD', fullName: 'Орлов Максим Сергеевич', role: 'Старший монтажник' },
+  { tabNumber: 'M002', passwordVariable: 'SEED_WORKER_PASSWORD', fullName: 'Кузнецов Алексей Дмитриевич', role: 'Монтажник' }
 ];
 
 const vidNames = [
@@ -339,8 +333,8 @@ const articles = [
 ];
 
 const insertEmployee = db.prepare(`
-  INSERT INTO "Сотрудник" ("Табельный_номер", "Пароль", "ФИО", "Должность")
-  VALUES (?, ?, ?, ?)
+  INSERT INTO "Сотрудник" ("Табельный_номер", "Пароль", "ФИО", "Должность", "Демо")
+  VALUES (?, ?, ?, ?, 1)
 `);
 const insertVid = db.prepare(`
   INSERT INTO "Виды_работ" ("Название", "updated_at") VALUES (?, ?)
@@ -362,7 +356,7 @@ const seed = db.transaction(() => {
   for (const employee of employees) {
     const result = insertEmployee.run(
       employee.tabNumber,
-      bcrypt.hashSync(employee.password, 10),
+      bcrypt.hashSync(demoPassword(employee.passwordVariable), 10),
       employee.fullName,
       employee.role
     );
@@ -411,11 +405,6 @@ console.log(`  сотрудники: ${employees.length}`);
 console.log(`  виды работ: ${vidNames.length}`);
 console.log(`  работы: ${works.length}`);
 console.log(`  статьи: ${articles.length}`);
-console.log('');
-console.log('Учётные записи:');
-for (const employee of employees) {
-  console.log(`  ${employee.role}: ${employee.tabNumber} / ${employee.password}`);
-}
 console.log('');
 console.log('Дальше: npm run generate-pdfs');
 console.log('Затем модуль ПТО: npm run migrate-pto (создаст объекты и документы ПТО)');

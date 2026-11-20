@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "init-admin": "node scripts/init-admin.js",
     "seed": "node seed.js",
     "generate-pdfs": "node generate-pdfs.js",
     "hash-passwords": "node hash-passwords.js",

@@ -95,7 +95,7 @@ export const config = {
   backupKeep: int('BACKUP_KEEP', 14),
   trustProxy: bool('TRUST_PROXY', false),
   cookieSecure: bool('COOKIE_SECURE', isProduction),
-  allowDemoAccounts: bool('ALLOW_DEMO_ACCOUNTS', !isProduction),
+  allowDemoAccounts: !isProduction && bool('ALLOW_DEMO_ACCOUNTS', true),
   trustedOrigins,
   // Внешние ИИ-провайдеры по умолчанию отключены: включение — отдельным решением.
   ai: {

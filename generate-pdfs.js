@@ -1,12 +1,12 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
+import config from './config.js';
+import { requireDemoEnvironment } from './lib/demo.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const dbPath = path.join(__dirname, 'infoteh.db');
-const uploadsRoot = path.resolve(__dirname, 'uploads');
+requireDemoEnvironment();
+const dbPath = config.databasePath;
+const uploadsRoot = config.uploadsPath;
 const force = process.argv.includes('--force');
 
 if (!fs.existsSync(dbPath)) {
@@ -175,7 +175,7 @@ for (const [file, title] of documents) {
     continue;
   }
 
-  const target = path.resolve(__dirname, normalized.replace(/^\/+/, ''));
+  const target = path.resolve(uploadsRoot, normalized.replace(/^\/?uploads\//, ''));
 
   if (target !== uploadsRoot && !target.startsWith(uploadsRoot + path.sep)) {
     console.warn(`Пропущен путь вне uploads/: ${file}`);
