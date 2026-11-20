@@ -1,7 +1,7 @@
 import express from 'express';
-import { asyncHandler, badRequest, conflict, notFound } from '../lib/errors.js';
+import { conflict, notFound } from '../lib/errors.js';
 import { ok } from '../lib/middleware.js';
-import { assertManagePto, assertObjectAccess, canAccessObject, isAdmin, objectScopeClause } from '../lib/permissions.js';
+import { assertManagePto, assertObjectAccess, assertDocumentLink, isAdmin, objectScopeClause } from '../lib/permissions.js';
 import { id as parseId, oneOf, text } from '../lib/validate.js';
 import { PTO_CLOSED_STATUSES, PTO_TYPES } from '../lib/constants.js';
 import { writeAudit } from '../lib/audit.js';
@@ -35,7 +35,7 @@ function computeState(requirements) {
   };
 }
 
-function loadSet(db, setId) {
+function getSet(db, user, setId) {
   const set = db.prepare(`
     SELECT k."ID_комплекта" as id, k."Название" as name, k."ID_объекта" as objectId, o."Название" as objectName,
            k."Ответственный" as responsible, k."Примечание" as note, k."Активен" as active, k."Создано" as createdAt,
@@ -45,8 +45,14 @@ function loadSet(db, setId) {
     WHERE k."ID_комплекта" = ?
   `).get(setId);
 
-  if (!set) return null;
+  if (!set) throw notFound();
+  assertObjectAccess(db, user, set.objectId);
 
+  return set;
+}
+
+function loadSet(db, user, setId) {
+  const set = getSet(db, user, setId);
   const requirements = db.prepare(`
     SELECT "ID_требования" as id, "Название" as name, "Тип_документа" as type,
            "Обязательно" as required, "Порядок" as sortOrder
@@ -62,34 +68,31 @@ function loadSet(db, setId) {
              d."Шифр" as cipher, d."Срок" as dueDate
       FROM "Документ_комплекта" s
       JOIN "Документ_ПТО" d ON s."ID_документа" = d."ID_документа"
-      WHERE s."ID_требования" = ?
+      WHERE s."ID_требования" = ? AND d."ID_объекта" = ?
       ORDER BY d."ID_документа"
-    `).all(requirement.id);
+    `).all(requirement.id, set.objectId);
   }
 
   return { ...set, active: Boolean(set.active), requirements, stats: computeState(requirements) };
-}
-
-function assertSetAccess(db, user, set) {
-  if (!set) throw notFound('Комплект не найден');
-  assertObjectAccess(db, user, set.objectId);
 }
 
 export function createCompletenessRouter({ db }) {
   const router = express.Router();
 
   router.get('/completeness', (req, res) => {
+    const scope = objectScopeClause(db, req.user, 'k."ID_объекта"');
     const rows = db.prepare(`
       SELECT k."ID_комплекта" as id, k."Название" as name, k."ID_объекта" as objectId, o."Название" as objectName,
              k."Ответственный" as responsible, k."Активен" as active, k."updated_at" as updatedAt
       FROM "Комплект" k
       LEFT JOIN "Объект" o ON k."ID_объекта" = o."ID_объекта"
+      WHERE 1 = 1 ${scope.clause}
       ORDER BY k."ID_комплекта" DESC
-    `).all().filter((row) => canAccessObject(db, req.user, row.objectId));
+    `).all(...scope.params);
 
     const data = rows.map((row) => {
-      const set = loadSet(db, row.id);
-      return { ...row, active: Boolean(row.active), stats: set ? set.stats : { total: 0, complete: 0, inWork: 0, missing: 0, percent: 0 } };
+      const set = loadSet(db, req.user, row.id);
+      return { ...row, active: Boolean(row.active), stats: set.stats };
     });
 
     ok(res, { data });
@@ -103,7 +106,7 @@ export function createCompletenessRouter({ db }) {
       const responsible = text(req.body.responsible, { field: 'Ответственный', max: 150 });
       const note = text(req.body.note, { field: 'Примечание', max: 1000 });
 
-      if (objectId) assertObjectAccess(db, req.user, objectId);
+      assertObjectAccess(db, req.user, objectId);
 
       const result = db.prepare(`
         INSERT INTO "Комплект" ("Название", "ID_объекта", "Ответственный", "Примечание", "Активен", "Создано", "updated_at")
@@ -121,8 +124,7 @@ export function createCompletenessRouter({ db }) {
   router.get('/completeness/:id', (req, res, next) => {
     try {
       const id = parseId(req.params.id, { field: 'Комплект' });
-      const set = loadSet(db, id);
-      assertSetAccess(db, req.user, set);
+      const set = loadSet(db, req.user, id);
       ok(res, { data: set });
     } catch (error) {
       next(error);
@@ -133,24 +135,32 @@ export function createCompletenessRouter({ db }) {
     try {
       assertManagePto(req.user);
       const id = parseId(req.params.id, { field: 'Комплект' });
-      const set = loadSet(db, id);
-      assertSetAccess(db, req.user, set);
+      db.transaction(() => {
+        const set = getSet(db, req.user, id);
 
-      const name = text(req.body.name, { field: 'Название', required: true, max: 200 });
-      const objectId = req.body.objectId ? parseId(req.body.objectId, { field: 'Объект' }) : null;
-      const responsible = text(req.body.responsible, { field: 'Ответственный', max: 150 });
-      const note = text(req.body.note, { field: 'Примечание', max: 1000 });
-      const active = req.body.active === false || req.body.active === 'false' ? 0 : 1;
+        const name = text(req.body.name, { field: 'Название', required: true, max: 200 });
+        const target = req.body.objectId === undefined ? set.objectId : req.body.objectId;
+        const objectId = target ? parseId(target, { field: 'Объект' }) : null;
+        const responsible = text(req.body.responsible, { field: 'Ответственный', max: 150 });
+        const note = text(req.body.note, { field: 'Примечание', max: 1000 });
+        const active = req.body.active === false || req.body.active === 'false' ? 0 : 1;
 
-      if (objectId) assertObjectAccess(db, req.user, objectId);
+        assertObjectAccess(db, req.user, objectId);
 
-      db.prepare(`
-        UPDATE "Комплект" SET "Название" = ?, "ID_объекта" = ?, "Ответственный" = ?, "Примечание" = ?,
-               "Активен" = ?, "updated_at" = datetime('now', 'localtime')
-        WHERE "ID_комплекта" = ?
-      `).run(name, objectId, responsible, note, active, id);
+        if (objectId !== set.objectId && db.prepare(`
+          SELECT 1 FROM "Требование_комплекта" r
+          JOIN "Документ_комплекта" s USING ("ID_требования")
+          JOIN "Документ_ПТО" d USING ("ID_документа")
+          WHERE r."ID_комплекта" = ? AND (d."ID_объекта" IS NULL OR d."ID_объекта" IS NOT ?) LIMIT 1
+        `).get(id, objectId)) throw conflict('Перенос несовместим с существующими связями');
 
-      writeAudit(db, { user: req.user, action: 'Изменение комплекта ИД', entity: 'completeness', entityId: id, objectId, result: 'success', ip: req.ip });
+        db.prepare(`
+          UPDATE "Комплект" SET "Название" = ?, "ID_объекта" = ?, "Ответственный" = ?, "Примечание" = ?,
+                 "Активен" = ?, "updated_at" = datetime('now', 'localtime')
+          WHERE "ID_комплекта" = ?
+        `).run(name, objectId, responsible, note, active, id);
+        writeAudit(db, { user: req.user, action: 'Изменение комплекта ИД', entity: 'completeness', entityId: id, objectId, result: 'success', ip: req.ip });
+      }).immediate();
 
       ok(res, {});
     } catch (error) {
@@ -162,13 +172,7 @@ export function createCompletenessRouter({ db }) {
     try {
       assertManagePto(req.user);
       const id = parseId(req.params.id, { field: 'Комплект' });
-      const set = loadSet(db, id);
-      assertSetAccess(db, req.user, set);
-
-      if (!isAdmin(req.user) && set.objectId) {
-        // Инженер ПТО может удалять только свои комплекты, администратор — любые.
-        // Авторство не хранится в старых записях, поэтому проверяем доступ по объекту.
-      }
+      const set = getSet(db, req.user, id);
 
       db.prepare('DELETE FROM "Комплект" WHERE "ID_комплекта" = ?').run(id);
 
@@ -184,8 +188,7 @@ export function createCompletenessRouter({ db }) {
     try {
       assertManagePto(req.user);
       const id = parseId(req.params.id, { field: 'Комплект' });
-      const set = loadSet(db, id);
-      assertSetAccess(db, req.user, set);
+      const set = getSet(db, req.user, id);
 
       const name = text(req.body.name, { field: 'Название требования', required: true, max: 300 });
       const type = req.body.type ? oneOf(req.body.type, PTO_TYPES, { field: 'Тип документа' }) : null;
@@ -213,10 +216,9 @@ export function createCompletenessRouter({ db }) {
       const requirementId = parseId(req.params.requirementId, { field: 'Требование' });
 
       const requirement = db.prepare('SELECT "ID_комплекта" as setId, "Название" as name FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
-      if (!requirement) throw notFound('Требование не найдено');
+      if (!requirement) throw notFound();
 
-      const set = loadSet(db, requirement.setId);
-      assertSetAccess(db, req.user, set);
+      getSet(db, req.user, requirement.setId);
 
       const name = text(req.body.name, { field: 'Название требования', required: true, max: 300 });
       const type = req.body.type ? oneOf(req.body.type, PTO_TYPES, { field: 'Тип документа' }) : null;
@@ -242,10 +244,9 @@ export function createCompletenessRouter({ db }) {
       const requirementId = parseId(req.params.requirementId, { field: 'Требование' });
 
       const requirement = db.prepare('SELECT "ID_комплекта" as setId FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
-      if (!requirement) throw notFound('Требование не найдено');
+      if (!requirement) throw notFound();
 
-      const set = loadSet(db, requirement.setId);
-      assertSetAccess(db, req.user, set);
+      getSet(db, req.user, requirement.setId);
 
       db.prepare('DELETE FROM "Требование_комплекта" WHERE "ID_требования" = ?').run(requirementId);
 
@@ -263,24 +264,18 @@ export function createCompletenessRouter({ db }) {
       const requirementId = parseId(req.params.requirementId, { field: 'Требование' });
       const documentId = parseId(req.body.documentId, { field: 'Документ' });
 
-      const requirement = db.prepare('SELECT "ID_комплекта" as setId FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
-      if (!requirement) throw notFound('Требование не найдено');
+      db.transaction(() => {
+        const requirement = db.prepare('SELECT "ID_комплекта" as setId FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
+        if (!requirement) throw notFound();
 
-      const set = loadSet(db, requirement.setId);
-      assertSetAccess(db, req.user, set);
+        const set = getSet(db, req.user, requirement.setId);
 
-      const document = db.prepare('SELECT "ID_объекта" as objectId FROM "Документ_ПТО" WHERE "ID_документа" = ?').get(documentId);
-      if (!document) throw notFound('Документ не найден');
-      assertObjectAccess(db, req.user, document.objectId);
+        assertDocumentLink(db, req.user, documentId, set.objectId);
 
-      if (set.objectId && document.objectId && set.objectId !== document.objectId) {
-        throw conflict('Документ относится к другому объекту');
-      }
-
-      db.prepare('INSERT OR IGNORE INTO "Документ_комплекта" ("ID_требования", "ID_документа", "Создано") VALUES (?, ?, datetime(\'now\', \'localtime\'))')
-        .run(requirementId, documentId);
-
-      writeAudit(db, { user: req.user, action: 'Привязка документа к комплекту', entity: 'completeness', entityId: requirement.setId, result: 'success', ip: req.ip, details: { documentId } });
+        db.prepare('INSERT OR IGNORE INTO "Документ_комплекта" ("ID_требования", "ID_документа", "Создано") VALUES (?, ?, datetime(\'now\', \'localtime\'))')
+          .run(requirementId, documentId);
+        writeAudit(db, { user: req.user, action: 'Привязка документа к комплекту', entity: 'completeness', entityId: requirement.setId, result: 'success', ip: req.ip, details: { documentId } });
+      }).immediate();
 
       ok(res, {});
     } catch (error) {
@@ -295,12 +290,15 @@ export function createCompletenessRouter({ db }) {
       const documentId = parseId(req.params.documentId, { field: 'Документ' });
 
       const requirement = db.prepare('SELECT "ID_комплекта" as setId FROM "Требование_комплекта" WHERE "ID_требования" = ?').get(requirementId);
-      if (!requirement) throw notFound('Требование не найдено');
+      if (!requirement) throw notFound();
 
-      const set = loadSet(db, requirement.setId);
-      assertSetAccess(db, req.user, set);
+      const set = getSet(db, req.user, requirement.setId);
 
-      db.prepare('DELETE FROM "Документ_комплекта" WHERE "ID_требования" = ? AND "ID_документа" = ?').run(requirementId, documentId);
+      // Администратор может вручную отвязать исторически несовместимый документ.
+      if (!isAdmin(req.user)) assertDocumentLink(db, req.user, documentId, set.objectId);
+      const result = db.prepare('DELETE FROM "Документ_комплекта" WHERE "ID_требования" = ? AND "ID_документа" = ?').run(requirementId, documentId);
+
+      if (!result.changes) throw notFound();
 
       writeAudit(db, { user: req.user, action: 'Отвязка документа от комплекта', entity: 'completeness', entityId: requirement.setId, result: 'success', ip: req.ip, details: { documentId } });
 
@@ -313,8 +311,7 @@ export function createCompletenessRouter({ db }) {
   router.get('/completeness/:id/missing.csv', (req, res, next) => {
     try {
       const id = parseId(req.params.id, { field: 'Комплект' });
-      const set = loadSet(db, id);
-      assertSetAccess(db, req.user, set);
+      const set = loadSet(db, req.user, id);
 
       const cell = (value) => {
         const string = String(value ?? '');

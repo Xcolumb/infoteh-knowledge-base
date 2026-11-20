@@ -38,7 +38,7 @@ test('доступ к файлам и объектам', async (t) => {
     assert.equal(response.status, 401);
   });
 
-  await t.test('инженер без доступа к объекту получает 403 на документ и файл', async () => {
+  await t.test('инженер без доступа к объекту получает 404 на документ и файл', async () => {
     // Документ в объекте Б, к которому у PTO901 доступа нет.
     await client.login('PTO900', PASSWORDS.pto);
     const created = await client.request('POST', '/api/pto', {
@@ -50,10 +50,10 @@ test('доступ к файлам и объектам', async (t) => {
 
     await client.login('PTO901', PASSWORDS.pto2);
     const document = await client.request('GET', `/api/pto/${docB}`);
-    assert.equal(document.status, 403);
+    assert.equal(document.status, 404);
 
     const file = await client.request('GET', `/api/files/document/${docB}`);
-    assert.equal(file.status, 403);
+    assert.equal(file.status, 404);
   });
 
   await t.test('список документов фильтруется по доступным объектам', async () => {
@@ -126,7 +126,7 @@ test('доступ к файлам и объектам', async (t) => {
 
     await client.login('PTO901', PASSWORDS.pto2);
     const response = await client.request('GET', `/api/files/revision/${revision.id}`);
-    assert.equal(response.status, 403);
+    assert.equal(response.status, 404);
   });
 
   await t.test('администратор видит документы всех объектов', async () => {

@@ -77,23 +77,27 @@ export function createReportsRouter({ db }) {
         AND d."Статус" NOT IN ('Утверждён', 'В архиве')
     `).get(...params).count;
 
+    const related = objectScopeClause(db, req.user, '"ID_объекта"');
+    const relatedClause = related.clause + (objectId ? ' AND "ID_объекта" = ?' : '');
+    const relatedParams = objectId ? [...related.params, objectId] : related.params;
+
     const remarksOpen = db.prepare(`
       SELECT COUNT(*) as count FROM "Замечание"
       WHERE "Статус" NOT IN (${REMARK_CLOSED_STATUSES.map(() => '?').join(', ')})
-        ${objectId ? 'AND "ID_объекта" = ?' : ''}
-    `).get(...REMARK_CLOSED_STATUSES, ...(objectId ? [objectId] : [])).count;
+        ${relatedClause}
+    `).get(...REMARK_CLOSED_STATUSES, ...relatedParams).count;
 
     const remarksOverdue = db.prepare(`
       SELECT COUNT(*) as count FROM "Замечание"
       WHERE "Срок" IS NOT NULL AND "Срок" <> '' AND "Срок" < date('now', 'localtime')
         AND "Статус" NOT IN (${REMARK_CLOSED_STATUSES.map(() => '?').join(', ')})
-        ${objectId ? 'AND "ID_объекта" = ?' : ''}
-    `).get(...REMARK_CLOSED_STATUSES, ...(objectId ? [objectId] : [])).count;
+        ${relatedClause}
+    `).get(...REMARK_CLOSED_STATUSES, ...relatedParams).count;
 
     const sets = db.prepare(`
       SELECT k."ID_комплекта" as id, k."Название" as name, k."ID_объекта" as objectId
-      FROM "Комплект" k ${objectId ? 'WHERE k."ID_объекта" = ?' : ''}
-    `).all(...(objectId ? [objectId] : []));
+      FROM "Комплект" k WHERE 1 = 1 ${relatedClause}
+    `).all(...relatedParams);
 
     let setsComplete = 0;
     let setsIncomplete = 0;
@@ -110,8 +114,8 @@ export function createReportsRouter({ db }) {
         const docs = db.prepare(`
           SELECT d."Статус" as status FROM "Документ_комплекта" s
           JOIN "Документ_ПТО" d ON s."ID_документа" = d."ID_документа"
-          WHERE s."ID_требования" = ?
-        `).all(requirement.id);
+          WHERE s."ID_требования" = ? AND d."ID_объекта" = ?
+        `).all(requirement.id, set.objectId);
 
         if (!docs.some((doc) => PTO_CLOSED_STATUSES.includes(doc.status))) {
           allReady = false;
@@ -196,6 +200,11 @@ export function createReportsRouter({ db }) {
     const conditions = ['1 = 1'];
     const params = [];
 
+    const objectId = Number(req.query.objectId) || null;
+    if (objectId) {
+      conditions.push('z."ID_объекта" = ?');
+      params.push(objectId);
+    }
     const scope = objectScopeClause(db, req.user, 'z."ID_объекта"');
     if (scope.clause) {
       conditions.push(scope.clause.replace(/^\s*AND\s*/, ''));
@@ -208,7 +217,7 @@ export function createReportsRouter({ db }) {
              z."Статус" as status, z."Дата_закрытия" as closedAt
       FROM "Замечание" z
       LEFT JOIN "Объект" o ON z."ID_объекта" = o."ID_объекта"
-      LEFT JOIN "Документ_ПТО" d ON z."ID_документа" = d."ID_документа"
+      LEFT JOIN "Документ_ПТО" d ON z."ID_документа" = d."ID_документа" AND z."ID_объекта" = d."ID_объекта"
       WHERE ${conditions.join(' AND ')}
       ORDER BY z."Срок"
     `).all(...params);

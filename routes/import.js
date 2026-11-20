@@ -2,7 +2,7 @@ import fs from 'fs';
 import express from 'express';
 import { asyncHandler, badRequest } from '../lib/errors.js';
 import { ok } from '../lib/middleware.js';
-import { assertManagePto, canAccessObject } from '../lib/permissions.js';
+import { assertManagePto, requirePtoManager, objectScopeClause, isAdmin } from '../lib/permissions.js';
 import { PTO_STATUSES, PTO_TYPES } from '../lib/constants.js';
 import { parseCsv, toObjects } from '../lib/csv.js';
 import { upload, fileMeta, removeStoredQuietly, resolveStoredPath } from '../lib/files.js';
@@ -56,7 +56,9 @@ function normalizeRow(row) {
 }
 
 function validateRows(db, rows, user) {
-  const objects = new Map(db.prepare('SELECT "ID_объекта" as id, "Название" as name FROM "Объект"').all().map((row) => [row.name.trim().toLowerCase(), row]));
+  const scope = objectScopeClause(db, user, 'o."ID_объекта"');
+  const visible = db.prepare(`SELECT o."ID_объекта" AS id, o."Название" AS name FROM "Объект" o WHERE 1 = 1 ${scope.clause}`).all(...scope.params);
+  const objects = new Map(visible.map((row) => [row.name.trim().toLowerCase(), row]));
 
   return rows.map((row, index) => {
     const errors = [];
@@ -73,12 +75,12 @@ function validateRows(db, rows, user) {
       const object = objects.get(normalized.object.toLowerCase());
 
       if (!object) {
-        errors.push(`объект не найден: «${normalized.object}»`);
-      } else if (!canAccessObject(db, user, object.id)) {
-        errors.push(`нет доступа к объекту «${normalized.object}»`);
+        errors.push('объект не найден');
       } else {
         objectId = object.id;
       }
+    } else if (!isAdmin(user)) {
+      errors.push('выберите доступный объект');
     }
 
     if (normalized.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(normalized.dueDate)) {
@@ -89,7 +91,7 @@ function validateRows(db, rows, user) {
       errors.push(`неизвестный статус «${normalized.status}»`);
     }
 
-    const duplicate = Boolean(db.prepare(`
+    const duplicate = errors.length === 0 && Boolean(db.prepare(`
       SELECT 1 FROM "Документ_ПТО"
       WHERE lower("Название") = lower(?) AND COALESCE("Шифр", '') = ? AND COALESCE("ID_объекта", 0) = ?
     `).get(normalized.title, normalized.cipher, objectId || 0));
@@ -106,8 +108,7 @@ function validateRows(db, rows, user) {
 export function createImportRouter({ db }) {
   const router = express.Router();
 
-  router.post('/import/preview', upload.single('file'), asyncHandler(async (req, res) => {
-    assertManagePto(req.user);
+  router.post('/import/preview', requirePtoManager, upload.single('file'), asyncHandler(async (req, res) => {
 
     const meta = fileMeta(req.file);
     if (!meta) throw badRequest('Файл CSV не приложен');

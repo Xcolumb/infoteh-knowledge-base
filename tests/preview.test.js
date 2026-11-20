@@ -220,7 +220,7 @@ test('встроенный просмотр документов', async (t) => 
     assert.equal(response.status, 401);
   });
 
-  await t.test('пользователь без доступа к объекту получает 403', async () => {
+  await t.test('пользователь без доступа к объекту получает 404', async () => {
     const docB = await upload(client, {
       objectId: ctx.objectB,
       name: 'Документ объекта Б.docx',
@@ -230,10 +230,10 @@ test('встроенный просмотр документов', async (t) => 
 
     await client.login('PTO901', PASSWORDS.pto2);
     const meta = await client.request('GET', `/api/preview/document/${docB}`);
-    assert.equal(meta.status, 403);
+    assert.equal(meta.status, 404);
 
     const content = await client.request('GET', `/api/preview/document/${docB}/content`);
-    assert.equal(content.status, 403);
+    assert.equal(content.status, 404);
   });
 
   await t.test('просмотр фиксируется в журнале аудита', async () => {

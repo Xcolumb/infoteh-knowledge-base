@@ -15,7 +15,7 @@ function loadDocument(db, id) {
     FROM "Документ_ПТО" WHERE "ID_документа" = ?
   `).get(id);
 
-  if (!row) throw notFound('Документ не найден');
+  if (!row) throw notFound();
   return row;
 }
 
@@ -29,7 +29,7 @@ function loadRevision(db, id) {
     WHERE r."ID_редакции" = ?
   `).get(id);
 
-  if (!row) throw notFound('Редакция не найдена');
+  if (!row) throw notFound();
   return row;
 }
 
@@ -43,7 +43,7 @@ function loadRemarkAttachment(db, id) {
     WHERE a."ID_вложения" = ?
   `).get(id);
 
-  if (!row) throw notFound('Вложение не найдено');
+  if (!row) throw notFound();
   return row;
 }
 

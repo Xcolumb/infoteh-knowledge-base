@@ -31,7 +31,7 @@ export function createFilesRouter({ db }) {
         FROM "Документ_ПТО" d WHERE d."ID_документа" = ?
       `).get(id);
 
-      if (!row) throw notFound('Документ не найден');
+      if (!row) throw notFound();
       assertObjectAccess(db, req.user, row.objectId);
       if (!row.file) throw notFound('Файл не привязан к документу');
 
@@ -53,7 +53,7 @@ export function createFilesRouter({ db }) {
         WHERE r."ID_редакции" = ?
       `).get(id);
 
-      if (!row) throw notFound('Редакция не найдена');
+      if (!row) throw notFound();
       assertObjectAccess(db, req.user, row.objectId);
       if (!row.file) throw notFound('У этой редакции нет файла');
 
@@ -75,7 +75,7 @@ export function createFilesRouter({ db }) {
         WHERE a."ID_вложения" = ?
       `).get(id);
 
-      if (!row) throw notFound('Вложение не найдено');
+      if (!row) throw notFound();
       assertObjectAccess(db, req.user, row.objectId);
 
       streamStoredFile(res, { storedPath: row.file, originalName: row.originalName, mime: row.mime, disposition });

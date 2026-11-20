@@ -58,14 +58,13 @@ export function createApp({ db = openDatabase(), cfg = config } = {}) {
   app.use('/api/auth/login', createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, name: 'login' }));
 
   app.use('/api', verifySameOrigin);
-  app.use(csrfProtection);
 
-  // Публичный маршрут входа (CSRF для него пропускается внутри csrfProtection).
+  // Вход публичный; изменяющие операции действующей сессии проверяет authRouter.
   app.use('/api/auth', createAuthRouter({ db }));
 
   // Все остальные /api требуют сессии.
   app.use('/api', createRateLimiter({ windowMs: 60 * 1000, max: 600, name: 'api' }));
-  app.use('/api', requireAuth(db));
+  app.use('/api', requireAuth(db), csrfProtection);
   app.use('/api', auditMiddleware(db));
 
   app.use('/api', createStaffRouter({ db }));

@@ -132,14 +132,10 @@ async function apiJsonSafe(url, options = {}) {
 // --- Авторизация ---
 
 function forceLogin(message) {
-  state.user = null;
-  state.csrfToken = '';
   sessionStorage.removeItem('current_user');
-  $('app-page').classList.add('hidden');
-  $('login-page').classList.remove('hidden');
-  $('password').value = '';
-  if (message) showError($('login-error'), message);
-  window.scrollTo(0, 0);
+  if (message) sessionStorage.setItem('login_notice', message);
+  // Новый документ очищает также результаты поиска, модальные окна и незавершённые запросы прежнего сеанса.
+  window.location.reload();
 }
 
 function applyRoleVisibility() {
@@ -1308,7 +1304,7 @@ async function openPtoForm(id) {
         </div>
         <div class="form-group">
           <label for="pto-form-object">Объект</label>
-          <select id="pto-form-object"><option value="">Без объекта</option>${objectOptions}</select>
+          <select id="pto-form-object" ${state.permissions.admin ? '' : 'required'}><option value="">${state.permissions.admin ? 'Без объекта' : 'Выберите объект'}</option>${objectOptions}</select>
         </div>
       </div>
 
@@ -1615,7 +1611,7 @@ function openSetForm() {
       <div class="form-row">
         <div class="form-group">
           <label for="set-object">Объект</label>
-          <select id="set-object"><option value="">Без объекта</option>${state.objects.map((object) => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('')}</select>
+          <select id="set-object" ${state.permissions.admin ? '' : 'required'}><option value="">${state.permissions.admin ? 'Без объекта' : 'Выберите объект'}</option>${state.objects.map((object) => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('')}</select>
         </div>
         <div class="form-group">
           <label for="set-responsible">Ответственный</label>
@@ -1663,7 +1659,7 @@ async function openSetDetail(id) {
   const set = data.data;
   const canManage = state.permissions.pto;
 
-  const documentsData = await apiJsonSafe(`${API_BASE}/pto?limit=500${set.objectId ? '&objectId=' + set.objectId : ''}`);
+  const documentsData = set.objectId ? await apiJsonSafe(`${API_BASE}/pto?limit=500&objectId=${set.objectId}`) : null;
   const documents = documentsData ? documentsData.data : [];
 
   const requirementRows = set.requirements.map((requirement) => `
@@ -1869,11 +1865,11 @@ async function openRemarkForm() {
       <div class="form-row">
         <div class="form-group">
           <label for="remark-object">Объект</label>
-          <select id="remark-object"><option value="">Без объекта</option>${state.objects.map((object) => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('')}</select>
+          <select id="remark-object" ${state.permissions.admin ? '' : 'required'}><option value="">${state.permissions.admin ? 'Без объекта' : 'Выберите объект'}</option>${state.objects.map((object) => `<option value="${object.id}">${escapeHtml(object.name)}</option>`).join('')}</select>
         </div>
         <div class="form-group">
           <label for="remark-document">Документ</label>
-          <select id="remark-document"><option value="">Без документа</option>${documents.map((doc) => `<option value="${doc.id}">${escapeHtml(doc.title)}</option>`).join('')}</select>
+          <select id="remark-document"><option value="">Без документа</option></select>
         </div>
       </div>
       <div class="form-group">
@@ -1902,6 +1898,12 @@ async function openRemarkForm() {
       </div>
     </form>
   `);
+
+  $('remark-object').addEventListener('change', () => {
+    const objectId = Number($('remark-object').value);
+    const matching = documents.filter((doc) => doc.objectId === objectId);
+    $('remark-document').replaceChildren(new Option('Без документа', ''), ...matching.map((doc) => new Option(doc.title, doc.id)));
+  });
 
   $('remark-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2636,6 +2638,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('current-year').textContent = String(new Date().getFullYear());
   setupEventListeners();
 
+  const notice = sessionStorage.getItem('login_notice');
+  if (notice) {
+    showError($('login-error'), notice);
+    sessionStorage.removeItem('login_notice');
+  }
   const saved = sessionStorage.getItem('current_user');
   if (!saved) return;
 

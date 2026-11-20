@@ -1,22 +1,22 @@
 import express from 'express';
-import { asyncHandler, badRequest, conflict, notFound } from '../lib/errors.js';
+import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { ok } from '../lib/middleware.js';
-import { assertManagePto, assertObjectAccess, canAccessObject, isAdmin, objectScopeClause } from '../lib/permissions.js';
+import { assertAdmin, assertManagePto, assertObjectAccess, assertDocumentLink, requirePtoManager, isAdmin, objectScopeClause } from '../lib/permissions.js';
 import { id as parseId, isoDate, oneOf, text } from '../lib/validate.js';
 import { NOTIFICATION_TYPES, REMARK_CLOSED_STATUSES } from '../lib/constants.js';
 import { upload, fileMeta, removeStoredQuietly } from '../lib/files.js';
 import { writeAudit } from '../lib/audit.js';
-import { notifyRecipients, recipientsFor } from '../lib/notifications.js';
+import { archiveSourceNotifications, notifyRecipients, recipientsFor } from '../lib/notifications.js';
 
 const REMARK_SELECT = `
   SELECT z."ID_замечания" as id, z."Номер" as number, z."Дата" as date, z."ID_объекта" as objectId,
-         o."Название" as objectName, z."ID_документа" as documentId, d."Название" as documentTitle,
+         o."Название" as objectName, d."ID_документа" as documentId, d."Название" as documentTitle,
          z."Описание" as description, z."Ответственный" as responsible, z."ID_ответственного" as responsibleId,
          z."Срок" as dueDate, z."Статус" as status, z."Дата_закрытия" as closedAt, z."ID_автора" as authorId,
          a."ФИО" as authorName, z."Создано" as createdAt, z."updated_at" as updatedAt
   FROM "Замечание" z
   LEFT JOIN "Объект" o ON z."ID_объекта" = o."ID_объекта"
-  LEFT JOIN "Документ_ПТО" d ON z."ID_документа" = d."ID_документа"
+  LEFT JOIN "Документ_ПТО" d ON z."ID_документа" = d."ID_документа" AND d."ID_объекта" = z."ID_объекта"
   LEFT JOIN "Сотрудник" a ON z."ID_автора" = a."ID_сотрудника"
 `;
 
@@ -37,7 +37,7 @@ function getRemark(db, id) {
 }
 
 function assertRemarkAccess(db, user, remark) {
-  if (!remark) throw notFound('Замечание не найдено');
+  if (!remark) throw notFound();
   assertObjectAccess(db, user, remark.objectId);
 }
 
@@ -57,9 +57,7 @@ export function createRemarksRouter({ db }) {
 
   router.post('/remark-statuses', (req, res, next) => {
     try {
-      if (!isAdmin(req.user)) {
-        return next(conflict('Изменять справочник статусов может только администратор'));
-      }
+      assertAdmin(req.user);
 
       const name = text(req.body.name, { field: 'Статус', required: true, max: 100 });
       const closing = req.body.closing === true || req.body.closing === 'true' ? 1 : 0;
@@ -131,32 +129,38 @@ export function createRemarksRouter({ db }) {
       const statusList = statuses(db).map((row) => row.name);
       const status = req.body.status ? oneOf(req.body.status, statusList, { field: 'Статус' }) : statusList[0];
 
-      if (objectId) assertObjectAccess(db, req.user, objectId);
+      const created = db.transaction(() => {
+        assertObjectAccess(db, req.user, objectId);
+        if (documentId !== null) assertDocumentLink(db, req.user, documentId, objectId);
 
-      const number = nextNumber(db);
+        const number = nextNumber(db);
 
-      const result = db.prepare(`
-        INSERT INTO "Замечание" ("Номер", "Дата", "ID_объекта", "ID_документа", "Описание", "Ответственный",
-          "ID_ответственного", "Срок", "Статус", "ID_автора", "Создано", "updated_at")
-        VALUES (?, date('now', 'localtime'), ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
-      `).run(number, objectId, documentId, description, responsible, responsibleId, dueDate, status, req.user.id);
+        const result = db.prepare(`
+          INSERT INTO "Замечание" ("Номер", "Дата", "ID_объекта", "ID_документа", "Описание", "Ответственный",
+            "ID_ответственного", "Срок", "Статус", "ID_автора", "Создано", "updated_at")
+          VALUES (?, date('now', 'localtime'), ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+        `).run(number, objectId, documentId, description, responsible, responsibleId, dueDate, status, req.user.id);
 
-      addHistory(db, result.lastInsertRowid, 'Создано', { author: req.user.fullName, statusTo: status });
+        addHistory(db, result.lastInsertRowid, 'Создано', { author: req.user.fullName, statusTo: status });
 
-      const recipients = responsibleId ? [responsibleId] : recipientsFor(db, responsible);
-      notifyRecipients(db, recipients, {
-        type: NOTIFICATION_TYPES.REMARK_NEW,
-        text: `Новое замечание ${number}: назначен срок ${dueDate || 'не указан'}`,
-        link: `remark:${result.lastInsertRowid}`,
-        key: `remark-new:${result.lastInsertRowid}:${Date.now()}`
-      });
+        const recipients = responsibleId ? [responsibleId] : recipientsFor(db, responsible);
+        notifyRecipients(db, recipients, {
+          objectId,
+          type: NOTIFICATION_TYPES.REMARK_NEW,
+          text: `Новое замечание ${number}: назначен срок ${dueDate || 'не указан'}`,
+          link: `remark:${result.lastInsertRowid}`,
+          key: `remark-new:${result.lastInsertRowid}:${Date.now()}`
+        });
 
-      writeAudit(db, {
-        user: req.user, action: 'Создание замечания', entity: 'remark', entityId: result.lastInsertRowid,
-        objectId, result: 'success', ip: req.ip, details: { number }
-      });
+        writeAudit(db, {
+          user: req.user, action: 'Создание замечания', entity: 'remark', entityId: result.lastInsertRowid,
+          objectId, result: 'success', ip: req.ip, details: { number }
+        });
 
-      ok(res, { data: { id: result.lastInsertRowid, number } });
+        return { id: result.lastInsertRowid, number };
+      }).immediate();
+
+      ok(res, { data: created });
     } catch (error) {
       next(error);
     }
@@ -195,44 +199,51 @@ export function createRemarksRouter({ db }) {
     try {
       assertManagePto(req.user);
       const id = parseId(req.params.id, { field: 'Замечание' });
-      const remark = getRemark(db, id);
-      assertRemarkAccess(db, req.user, remark);
+      db.transaction(() => {
+        const remark = getRemark(db, id);
+        assertRemarkAccess(db, req.user, remark);
 
-      const objectId = req.body.objectId ? parseId(req.body.objectId, { field: 'Объект' }) : remark.objectId;
-      if (objectId) assertObjectAccess(db, req.user, objectId);
+        const objectId = req.body.objectId === undefined ? remark.objectId : parseId(req.body.objectId, { field: 'Объект', required: false });
+        assertObjectAccess(db, req.user, objectId);
+        // Для проверки читаем исходную связь, включая скрытую историческую.
+        const previous = db.prepare('SELECT "ID_документа" AS documentId FROM "Замечание" WHERE "ID_замечания" = ?').get(id);
+        const documentId = req.body.documentId === undefined ? previous.documentId : parseId(req.body.documentId, { field: 'Документ', required: false });
+        if (documentId !== null) assertDocumentLink(db, req.user, documentId, objectId);
+        if (objectId !== remark.objectId) archiveSourceNotifications(db, `remark:${id}`);
 
-      const description = text(req.body.description, { field: 'Описание замечания', required: true, max: 5000 });
-      const responsible = text(req.body.responsible, { field: 'Ответственный', max: 150 });
-      const responsibleId = req.body.responsibleId ? parseId(req.body.responsibleId, { field: 'Ответственный' }) : null;
-      const dueDate = isoDate(req.body.dueDate, { field: 'Срок' });
-      const statusList = statuses(db);
-      const status = oneOf(req.body.status || remark.status, statusList.map((row) => row.name), { field: 'Статус' });
-      const closing = statusList.find((row) => row.name === status);
+        const description = text(req.body.description, { field: 'Описание замечания', required: true, max: 5000 });
+        const responsible = text(req.body.responsible, { field: 'Ответственный', max: 150 });
+        const responsibleId = req.body.responsibleId ? parseId(req.body.responsibleId, { field: 'Ответственный' }) : null;
+        const dueDate = isoDate(req.body.dueDate, { field: 'Срок' });
+        const statusList = statuses(db);
+        const status = oneOf(req.body.status || remark.status, statusList.map((row) => row.name), { field: 'Статус' });
+        const closing = statusList.find((row) => row.name === status);
 
-      db.prepare(`
-        UPDATE "Замечание"
-        SET "ID_объекта" = ?, "Описание" = ?, "Ответственный" = ?, "ID_ответственного" = ?, "Срок" = ?,
-            "Статус" = ?, "Дата_закрытия" = ?, "updated_at" = datetime('now', 'localtime')
-        WHERE "ID_замечания" = ?
-      `).run(
-        objectId, description, responsible, responsibleId, dueDate, status,
-        closing && closing.closing ? (remark.closedAt || new Date().toISOString().slice(0, 10)) : null,
-        id
-      );
+        db.prepare(`
+          UPDATE "Замечание"
+          SET "ID_объекта" = ?, "ID_документа" = ?, "Описание" = ?, "Ответственный" = ?, "ID_ответственного" = ?, "Срок" = ?,
+              "Статус" = ?, "Дата_закрытия" = ?, "updated_at" = datetime('now', 'localtime')
+          WHERE "ID_замечания" = ?
+        `).run(
+          objectId, documentId, description, responsible, responsibleId, dueDate, status,
+          closing && closing.closing ? (remark.closedAt || new Date().toISOString().slice(0, 10)) : null,
+          id
+        );
 
-      if (remark.status !== status) {
-        addHistory(db, id, 'Смена статуса', {
-          author: req.user.fullName,
-          statusFrom: remark.status,
-          statusTo: status,
-          comment: text(req.body.comment, { field: 'Комментарий', max: 1000 })
+        if (remark.status !== status) {
+          addHistory(db, id, 'Смена статуса', {
+            author: req.user.fullName,
+            statusFrom: remark.status,
+            statusTo: status,
+            comment: text(req.body.comment, { field: 'Комментарий', max: 1000 })
+          });
+        }
+
+        writeAudit(db, {
+          user: req.user, action: 'Изменение замечания', entity: 'remark', entityId: id,
+          objectId, result: 'success', ip: req.ip
         });
-      }
-
-      writeAudit(db, {
-        user: req.user, action: 'Изменение замечания', entity: 'remark', entityId: id,
-        objectId, result: 'success', ip: req.ip
-      });
+      }).immediate();
 
       ok(res, {});
     } catch (error) {
@@ -292,16 +303,14 @@ export function createRemarksRouter({ db }) {
     }
   });
 
-  router.post('/remarks/:id/attachments', upload.single('file'), asyncHandler(async (req, res) => {
-    assertManagePto(req.user);
-    const id = parseId(req.params.id, { field: 'Замечание' });
-    const remark = getRemark(db, id);
-    assertRemarkAccess(db, req.user, remark);
-
+  router.post('/remarks/:id/attachments', requirePtoManager, upload.single('file'), asyncHandler(async (req, res) => {
     const meta = fileMeta(req.file);
-    if (!meta) throw badRequest('Файл не приложен');
-
     try {
+      const id = parseId(req.params.id, { field: 'Замечание' });
+      const remark = getRemark(db, id);
+      assertRemarkAccess(db, req.user, remark);
+      if (!meta) throw badRequest('Файл не приложен');
+
       db.prepare(`
         INSERT INTO "Вложение_замечания" ("ID_замечания", "Файл", "Оригинальное_имя", "Размер", "MIME", "Автор", "Создано")
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
@@ -313,7 +322,7 @@ export function createRemarksRouter({ db }) {
 
       ok(res, {});
     } catch (error) {
-      removeStoredQuietly(meta.storedPath);
+      if (meta) removeStoredQuietly(meta.storedPath);
       throw error;
     }
   }));
@@ -326,7 +335,7 @@ export function createRemarksRouter({ db }) {
       assertRemarkAccess(db, req.user, remark);
 
       if (!isAdmin(req.user) && remark.authorId && remark.authorId !== req.user.id) {
-        throw conflict('Удалить замечание другого автора может только администратор');
+        throw forbidden('Удалить замечание другого автора может только администратор');
       }
 
       const attachments = db.prepare('SELECT "Файл" as file FROM "Вложение_замечания" WHERE "ID_замечания" = ?').all(id);

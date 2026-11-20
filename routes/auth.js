@@ -4,7 +4,7 @@ import config from '../config.js';
 import { asyncHandler } from '../lib/errors.js';
 import { badRequest, forbidden, unauthorized } from '../lib/errors.js';
 import { ok, requireAuth } from '../lib/middleware.js';
-import { ensureCsrfToken, isLoginBlocked, recordLoginFailure, resetLoginAttempts, rotateCsrfToken } from '../lib/security.js';
+import { csrfProtection, ensureCsrfToken, isLoginBlocked, recordLoginFailure, resetLoginAttempts, rotateCsrfToken } from '../lib/security.js';
 import { password as validatePassword, text } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
 import { logger } from '../lib/logger.js';
@@ -111,6 +111,8 @@ export function createAuthRouter({ db }) {
     });
   }));
 
+  router.use(requireAuth(db), csrfProtection);
+
   router.post('/logout', (req, res) => {
     const user = req.session ? { id: req.session.userId, fullName: req.session.fullName } : null;
 
@@ -126,9 +128,7 @@ export function createAuthRouter({ db }) {
     });
   });
 
-  const requireSession = requireAuth(db);
-
-  router.get('/session', requireSession, (req, res) => {
+  router.get('/session', (req, res) => {
     ok(res, {
       user: publicUser({ ...req.user, demo: req.user.demo }),
       csrfToken: ensureCsrfToken(req),
@@ -140,7 +140,7 @@ export function createAuthRouter({ db }) {
     });
   });
 
-  router.post('/password', requireSession, asyncHandler(async (req, res) => {
+  router.post('/password', asyncHandler(async (req, res) => {
     const currentPassword = String(req.body.currentPassword || '');
     const newPassword = String(req.body.newPassword || '');
 

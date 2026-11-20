@@ -1,13 +1,13 @@
 import express from 'express';
-import { asyncHandler, badRequest, conflict, notFound } from '../lib/errors.js';
+import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { ok } from '../lib/middleware.js';
-import { assertManagePto, assertObjectAccess, canAccessObject, isAdmin, objectScopeClause } from '../lib/permissions.js';
+import { assertManagePto, assertObjectAccess, requirePtoManager, isAdmin, objectScopeClause } from '../lib/permissions.js';
 import { id as parseId, isoDate, oneOf, text } from '../lib/validate.js';
 import { PTO_CLOSED_STATUSES, PTO_STATUSES, PTO_TYPES } from '../lib/constants.js';
 import { upload, fileMeta, removeStoredQuietly } from '../lib/files.js';
 import { ensureDocumentText, indexDocument, removeIndex } from '../lib/search.js';
 import { writeAudit } from '../lib/audit.js';
-import { notifyRecipients, notifyStatusChange, recipientsFor } from '../lib/notifications.js';
+import { archiveSourceNotifications, notifyRecipients, notifyStatusChange, recipientsFor } from '../lib/notifications.js';
 import { NOTIFICATION_TYPES } from '../lib/constants.js';
 
 const DOC_SELECT = `
@@ -37,7 +37,7 @@ function getDoc(db, id) {
 }
 
 function assertDocAccess(db, user, doc) {
-  if (!doc) throw notFound('Документ не найден');
+  if (!doc) throw notFound();
   assertObjectAccess(db, user, doc.objectId);
 }
 
@@ -75,8 +75,9 @@ export function createPtoRouter({ db }) {
   // --- Справочники ---
 
   router.get('/pto/meta', (req, res) => {
-    const objects = db.prepare('SELECT "ID_объекта" as id, "Название" as name FROM "Объект" ORDER BY "Название"').all()
-      .filter((object) => canAccessObject(db, req.user, object.id));
+    const scope = objectScopeClause(db, req.user, 'o."ID_объекта"');
+    const objects = db.prepare(`SELECT o."ID_объекта" as id, o."Название" as name
+      FROM "Объект" o WHERE 1 = 1 ${scope.clause} ORDER BY o."Название"`).all(...scope.params);
 
     ok(res, {
       types: PTO_TYPES,
@@ -90,15 +91,16 @@ export function createPtoRouter({ db }) {
   // --- Объекты ---
 
   router.get('/objects', (req, res) => {
+    const scope = objectScopeClause(db, req.user, 'o."ID_объекта"');
     const rows = db.prepare(`
       SELECT o."ID_объекта" as id, o."Название" as name, o."Адрес" as address, o."Заказчик" as customer,
              o."updated_at" as updatedAt,
              (SELECT COUNT(*) FROM "Документ_ПТО" d WHERE d."ID_объекта" = o."ID_объекта") as documentsCount
-      FROM "Объект" o
+      FROM "Объект" o WHERE 1 = 1 ${scope.clause}
       ORDER BY o."Название"
-    `).all();
+    `).all(...scope.params);
 
-    ok(res, { data: rows.filter((row) => canAccessObject(db, req.user, row.id)) });
+    ok(res, { data: rows });
   });
 
   router.post('/objects', (req, res, next) => {
@@ -108,18 +110,22 @@ export function createPtoRouter({ db }) {
       const address = text(req.body.address, { field: 'Адрес', max: 300 });
       const customer = text(req.body.customer, { field: 'Заказчик', max: 200 });
 
-      const result = db.prepare(`
-        INSERT INTO "Объект" ("Название", "Адрес", "Заказчик", "updated_at")
-        VALUES (?, ?, ?, datetime('now', 'localtime'))
-      `).run(name, address, customer);
+      const objectId = db.transaction(() => {
+        const result = db.prepare(`
+          INSERT INTO "Объект" ("Название", "Адрес", "Заказчик", "updated_at")
+          VALUES (?, ?, ?, datetime('now', 'localtime'))
+        `).run(name, address, customer);
 
-      // Создатель объекта сразу получает к нему доступ (для роли «Инженер ПТО»).
-      db.prepare('INSERT OR IGNORE INTO "Доступ_объект" ("ID_сотрудника", "ID_объекта") VALUES (?, ?)')
-        .run(req.user.id, result.lastInsertRowid);
+        // Создатель объекта сразу получает к нему доступ (для роли «Инженер ПТО»).
+        db.prepare('INSERT OR IGNORE INTO "Доступ_объект" ("ID_сотрудника", "ID_объекта") VALUES (?, ?)')
+          .run(req.user.id, result.lastInsertRowid);
 
-      writeAudit(db, { user: req.user, action: 'Создание объекта', entity: 'object', entityId: result.lastInsertRowid, result: 'success', ip: req.ip, details: { name } });
+        return result.lastInsertRowid;
+      }).immediate();
 
-      ok(res, { data: { id: result.lastInsertRowid, name, address, customer } });
+      writeAudit(db, { user: req.user, action: 'Создание объекта', entity: 'object', entityId: objectId, result: 'success', ip: req.ip, details: { name } });
+
+      ok(res, { data: { id: objectId, name, address, customer } });
     } catch (error) {
       if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return next(conflict('Объект с таким названием уже существует'));
       next(error);
@@ -130,6 +136,7 @@ export function createPtoRouter({ db }) {
     try {
       assertManagePto(req.user);
       const id = parseId(req.params.id, { field: 'Объект' });
+      assertObjectAccess(db, req.user, id);
       const name = text(req.body.name, { field: 'Название', required: true, max: 200 });
       const address = text(req.body.address, { field: 'Адрес', max: 300 });
       const customer = text(req.body.customer, { field: 'Заказчик', max: 200 });
@@ -139,7 +146,7 @@ export function createPtoRouter({ db }) {
         WHERE "ID_объекта" = ?
       `).run(name, address, customer, id);
 
-      if (!result.changes) throw notFound('Объект не найден');
+      if (!result.changes) throw notFound();
 
       writeAudit(db, { user: req.user, action: 'Изменение объекта', entity: 'object', entityId: id, result: 'success', ip: req.ip });
       ok(res, {});
@@ -153,15 +160,22 @@ export function createPtoRouter({ db }) {
     try {
       assertManagePto(req.user);
       const id = parseId(req.params.id, { field: 'Объект' });
+      db.transaction(() => {
+        assertObjectAccess(db, req.user, id);
 
-      const count = db.prepare('SELECT COUNT(*) as count FROM "Документ_ПТО" WHERE "ID_объекта" = ?').get(id).count;
-      if (count > 0) throw conflict(`Невозможно удалить: к объекту привязано ${count} документов`);
+        const count = db.prepare('SELECT COUNT(*) as count FROM "Документ_ПТО" WHERE "ID_объекта" = ?').get(id).count;
+        if (count > 0) throw conflict(`Невозможно удалить: к объекту привязано ${count} документов`);
 
-      const remarks = db.prepare('SELECT COUNT(*) as count FROM "Замечание" WHERE "ID_объекта" = ?').get(id).count;
-      if (remarks > 0) throw conflict(`Невозможно удалить: к объекту привязано ${remarks} замечаний`);
+        const remarks = db.prepare('SELECT COUNT(*) as count FROM "Замечание" WHERE "ID_объекта" = ?').get(id).count;
+        if (remarks > 0) throw conflict(`Невозможно удалить: к объекту привязано ${remarks} замечаний`);
 
-      const result = db.prepare('DELETE FROM "Объект" WHERE "ID_объекта" = ?').run(id);
-      if (!result.changes) throw notFound('Объект не найден');
+        if (db.prepare('SELECT 1 FROM "Комплект" WHERE "ID_объекта" = ? LIMIT 1').get(id)) {
+          throw conflict('К объекту привязан комплект ИД');
+        }
+
+        const result = db.prepare('DELETE FROM "Объект" WHERE "ID_объекта" = ?').run(id);
+        if (!result.changes) throw notFound();
+      }).immediate();
 
       writeAudit(db, { user: req.user, action: 'Удаление объекта', entity: 'object', entityId: id, result: 'success', ip: req.ip });
       ok(res, {});
@@ -303,13 +317,11 @@ export function createPtoRouter({ db }) {
     }
   });
 
-  router.post('/pto', upload.single('docFile'), asyncHandler(async (req, res) => {
-    assertManagePto(req.user);
-    const fields = parseDocFields(req.body);
+  router.post('/pto', requirePtoManager, upload.single('docFile'), asyncHandler(async (req, res) => {
     const meta = fileMeta(req.file);
-
     try {
-      if (fields.objectId) assertObjectAccess(db, req.user, fields.objectId);
+      const fields = parseDocFields(req.body);
+      assertObjectAccess(db, req.user, fields.objectId);
 
       const result = db.prepare(`
         INSERT INTO "Документ_ПТО" (
@@ -345,6 +357,7 @@ export function createPtoRouter({ db }) {
       if (fields.responsible) {
         const recipients = recipientsFor(db, fields.responsible);
         notifyRecipients(db, recipients, {
+          objectId: fields.objectId,
           type: NOTIFICATION_TYPES.DOC_ASSIGNED,
           text: `Назначен ответственный по документу «${fields.title}»`,
           link: `pto:${documentId}`,
@@ -370,93 +383,106 @@ export function createPtoRouter({ db }) {
     }
   }));
 
-  router.put('/pto/:id', upload.single('docFile'), asyncHandler(async (req, res) => {
-    assertManagePto(req.user);
-
-    const id = parseId(req.params.id, { field: 'Документ' });
-    const fields = parseDocFields(req.body);
+  router.put('/pto/:id', requirePtoManager, upload.single('docFile'), asyncHandler(async (req, res) => {
     const meta = fileMeta(req.file);
-
     try {
-      const existing = getDoc(db, id);
-      assertDocAccess(db, req.user, existing);
-      if (fields.objectId) assertObjectAccess(db, req.user, fields.objectId);
+      const updated = db.transaction(() => {
+        const id = parseId(req.params.id, { field: 'Документ' });
+        const existing = getDoc(db, id);
+        assertDocAccess(db, req.user, existing);
+        const fields = parseDocFields({ objectId: existing.objectId, ...req.body });
+        assertObjectAccess(db, req.user, fields.objectId);
+        if (existing.objectId !== fields.objectId) {
+          const incompatible = db.prepare(`
+            SELECT 1 FROM "Замечание" WHERE "ID_документа" = ? AND ("ID_объекта" IS NULL OR "ID_объекта" IS NOT ?)
+            UNION ALL
+            SELECT 1 FROM "Документ_комплекта" s
+            JOIN "Требование_комплекта" r USING ("ID_требования")
+            JOIN "Комплект" k USING ("ID_комплекта")
+            WHERE s."ID_документа" = ? AND (k."ID_объекта" IS NULL OR k."ID_объекта" IS NOT ?) LIMIT 1
+          `).get(id, fields.objectId, id, fields.objectId);
+          if (incompatible) throw conflict('Перенос несовместим с существующими связями');
+          archiveSourceNotifications(db, `pto:${id}`);
+        }
 
-      const newRevision = Boolean(meta) || String(req.body.newRevision || '') === 'true';
-      const version = newRevision ? Number(existing.version || 1) + 1 : Number(existing.version || 1);
-      const statusChanged = existing.status !== fields.status;
+        const newRevision = Boolean(meta) || String(req.body.newRevision || '') === 'true';
+        const version = newRevision ? Number(existing.version || 1) + 1 : Number(existing.version || 1);
+        const statusChanged = existing.status !== fields.status;
 
-      db.prepare(`
-        UPDATE "Документ_ПТО"
-        SET "Тип" = ?, "Название" = ?, "ID_объекта" = ?, "Шифр" = ?, "Раздел_проекта" = ?, "Статус" = ?,
-            "Срок" = ?, "Ответственный" = ?, "Текст" = ?, "Файл" = ?, "Оригинальное_имя" = ?,
-            "Размер" = ?, "MIME" = ?, "Версия" = ?, "Актуализирован" = date('now', 'localtime'),
-            "updated_at" = datetime('now', 'localtime')
-        WHERE "ID_документа" = ?
-      `).run(
-        fields.type, fields.title, fields.objectId, fields.cipher, fields.projectSection, fields.status,
-        fields.dueDate, fields.responsible, fields.content,
-        meta ? meta.storedPath : existing.filePath,
-        meta ? meta.originalName : existing.originalName,
-        meta ? meta.size : existing.size,
-        meta ? meta.mime : existing.mime,
-        version, id
-      );
+        db.prepare(`
+          UPDATE "Документ_ПТО"
+          SET "Тип" = ?, "Название" = ?, "ID_объекта" = ?, "Шифр" = ?, "Раздел_проекта" = ?, "Статус" = ?,
+              "Срок" = ?, "Ответственный" = ?, "Текст" = ?, "Файл" = ?, "Оригинальное_имя" = ?,
+              "Размер" = ?, "MIME" = ?, "Версия" = ?, "Актуализирован" = date('now', 'localtime'),
+              "updated_at" = datetime('now', 'localtime')
+          WHERE "ID_документа" = ?
+        `).run(
+          fields.type, fields.title, fields.objectId, fields.cipher, fields.projectSection, fields.status,
+          fields.dueDate, fields.responsible, fields.content,
+          meta ? meta.storedPath : existing.filePath,
+          meta ? meta.originalName : existing.originalName,
+          meta ? meta.size : existing.size,
+          meta ? meta.mime : existing.mime,
+          version, id
+        );
 
-      if (statusChanged) {
-        addHistory(db, id, 'Смена статуса', {
-          author: req.user.fullName,
-          statusFrom: existing.status,
-          statusTo: fields.status,
-          version,
-          comment: text(req.body.comment, { field: 'Комментарий', max: 500 })
+        if (statusChanged) {
+          addHistory(db, id, 'Смена статуса', {
+            author: req.user.fullName,
+            statusFrom: existing.status,
+            statusTo: fields.status,
+            version,
+            comment: text(req.body.comment, { field: 'Комментарий', max: 500 })
+          });
+
+          notifyStatusChange(db, { ...fields, id }, {
+            statusFrom: existing.objectId === fields.objectId ? existing.status : null,
+            statusTo: fields.status,
+            comment: existing.objectId === fields.objectId ? req.body.comment : null,
+            actor: req.user
+          });
+        }
+
+        if (newRevision) {
+          addRevision(db, id, {
+            version,
+            file: meta ? meta.storedPath : null,
+            originalName: meta ? meta.originalName : existing.originalName,
+            size: meta ? meta.size : existing.size,
+            mime: meta ? meta.mime : existing.mime,
+            comment: text(req.body.comment, { field: 'Комментарий', max: 500 }) || (meta ? 'Заменён файл документа' : 'Новая редакция'),
+            author: req.user.fullName
+          });
+
+          addHistory(db, id, 'Новая редакция', {
+            author: req.user.fullName,
+            version,
+            comment: text(req.body.comment, { field: 'Комментарий', max: 500 })
+          });
+        }
+
+        if (!statusChanged && !newRevision) {
+          addHistory(db, id, 'Изменён', { author: req.user.fullName, version });
+        }
+
+        ensureDocumentText(db, id, { force: true });
+        indexDocument(db, id);
+
+        writeAudit(db, {
+          user: req.user,
+          action: 'Изменение документа ПТО',
+          entity: 'document',
+          entityId: id,
+          objectId: fields.objectId,
+          result: 'success',
+          ip: req.ip,
+          details: { version, statusChanged, newRevision }
         });
 
-        notifyStatusChange(db, { ...existing, ID_документа: id }, {
-          statusFrom: existing.status,
-          statusTo: fields.status,
-          comment: req.body.comment,
-          actor: req.user
-        });
-      }
+        return { id, version };
+      }).immediate();
+      ok(res, { data: updated });
 
-      if (newRevision) {
-        addRevision(db, id, {
-          version,
-          file: meta ? meta.storedPath : null,
-          originalName: meta ? meta.originalName : existing.originalName,
-          size: meta ? meta.size : existing.size,
-          mime: meta ? meta.mime : existing.mime,
-          comment: text(req.body.comment, { field: 'Комментарий', max: 500 }) || (meta ? 'Заменён файл документа' : 'Новая редакция'),
-          author: req.user.fullName
-        });
-
-        addHistory(db, id, 'Новая редакция', {
-          author: req.user.fullName,
-          version,
-          comment: text(req.body.comment, { field: 'Комментарий', max: 500 })
-        });
-      }
-
-      if (!statusChanged && !newRevision) {
-        addHistory(db, id, 'Изменён', { author: req.user.fullName, version });
-      }
-
-      ensureDocumentText(db, id, { force: true });
-      indexDocument(db, id);
-
-      writeAudit(db, {
-        user: req.user,
-        action: 'Изменение документа ПТО',
-        entity: 'document',
-        entityId: id,
-        objectId: fields.objectId,
-        result: 'success',
-        ip: req.ip,
-        details: { version, statusChanged, newRevision }
-      });
-
-      ok(res, { data: { id, version } });
     } catch (error) {
       if (meta) removeStoredQuietly(meta.storedPath);
       throw error;
@@ -522,7 +548,7 @@ export function createPtoRouter({ db }) {
       assertDocAccess(db, req.user, existing);
 
       if (!isAdmin(req.user) && existing.authorId && existing.authorId !== req.user.id) {
-        throw conflict('Удалить документ другого автора может только администратор');
+        throw forbidden('Удалить документ другого автора может только администратор');
       }
 
       const revisions = db.prepare('SELECT "Файл" as file FROM "Редакция_ПТО" WHERE "ID_документа" = ?').all(id);

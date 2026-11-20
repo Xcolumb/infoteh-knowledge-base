@@ -1,7 +1,6 @@
 import express from 'express';
 import { ok } from '../lib/middleware.js';
-import { searchAll, ftsAvailable } from '../lib/search.js';
-import { getAccessibleObjectIds } from '../lib/permissions.js';
+import { searchAll, indexedCount, ftsAvailable } from '../lib/search.js';
 import { writeAudit } from '../lib/audit.js';
 
 export function createSearchRouter({ db }) {
@@ -11,8 +10,7 @@ export function createSearchRouter({ db }) {
     const query = String(req.query.q || '').trim().slice(0, 200);
     const limit = Math.min(Number(req.query.limit) || 30, 100);
 
-    const accessibleObjectIds = getAccessibleObjectIds(db, req.user);
-    const { engine, results } = searchAll(db, { query, accessibleObjectIds, limit });
+    const { engine, results } = searchAll(db, { query, user: req.user, limit });
 
     if (query.length >= 2) {
       writeAudit(db, {
@@ -40,9 +38,7 @@ export function createSearchRouter({ db }) {
   });
 
   router.get('/search/status', (req, res) => {
-    const indexed = ftsAvailable(db)
-      ? db.prepare('SELECT COUNT(*) as count FROM "Поиск"').get().count
-      : 0;
+    const indexed = indexedCount(db, req.user);
 
     ok(res, {
       engine: ftsAvailable(db) ? 'fts5' : 'like',
