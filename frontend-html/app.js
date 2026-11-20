@@ -235,6 +235,7 @@ async function showApp() {
 
 const PAGES = {
   dashboard: 'dashboard-page',
+  tasks: 'tasks-page',
   objects: 'objects-page',
   executive: 'pto-page',
   instructions: 'instructions-page',
@@ -296,6 +297,9 @@ async function navigateTo(page) {
       break;
     case 'dashboard':
       await loadDashboard();
+      break;
+    case 'tasks':
+      await taskUI.load();
       break;
     case 'pto':
       await loadPtoObjects();
@@ -1633,11 +1637,11 @@ async function runGlobalSearch() {
     button.className = 'search-result';
     button.textContent = item.title;
     const isDocument = item.kind === 'document';
-    button.addEventListener('click', () => { hideSearch(); return isDocument ? openPtoDoc(item.id) : openArticleModal(item.id); });
+    button.addEventListener('click', () => { hideSearch(); if (item.kind === 'task') return taskUI.fromLink(item.id); return isDocument ? openPtoDoc(item.id) : openArticleModal(item.id); });
 
     const detail = document.createElement('span');
     detail.className = 'search-kind';
-    detail.textContent = isDocument ? 'Документ ПТО' : 'Статья';
+    detail.textContent = item.kind === 'task' ? 'Задача' : isDocument ? 'Документ ПТО' : 'Статья';
     if (item.fragment) {
       detail.append(' · ');
       let cursor = 0;
@@ -2230,7 +2234,7 @@ async function openNotifications() {
   const items = data.data.map((item) => `
     <div class="compact-item notification-row">
       <div>
-        <div>${escapeHtml(item.text)}</div>
+        <div>${/^task:\d+$/.test(item.link || '') ? `<button class="text-btn" data-notice-task="${Number(item.link.slice(5))}">${escapeHtml(item.text)}</button>` : escapeHtml(item.text)}</div>
         <div class="pto-doc-sub">${formatDateTime(item.createdAt)}</div>
       </div>
       ${item.read ? '' : `<button onclick="markNotificationRead(${item.id})">Прочитано</button>`}
@@ -2245,6 +2249,11 @@ async function openNotifications() {
     </div>
   `);
 }
+
+document.addEventListener('click', event => {
+  const link = event.target.closest('[data-notice-task]');
+  if (link) { closeModal(); taskUI.fromLink(Number(link.dataset.noticeTask)); }
+});
 
 async function markNotificationRead(id) {
   await apiJsonSafe(`${API_BASE}/notifications/${id}/read`, { method: 'POST' });
@@ -2632,6 +2641,7 @@ function setupEventListeners() {
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+      if ($('task-panel').open) return;
       if (drawer.open) return;
       if (!$('global-search-results').hidden || $('top-search').classList.contains('expanded')) {
         hideSearch();

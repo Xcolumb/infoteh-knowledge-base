@@ -1,0 +1,36 @@
+#task-panel { position:fixed; inset:0 0 0 auto; margin:0; width:min(540px,100%); height:100dvh; max-height:none; max-width:100%; border:0; color:var(--ink); padding:0; }
+#task-panel::backdrop { background:rgb(12 27 41 / 42%); }
+body.task-open { overflow:hidden; }
+.task-panel-header,.task-pager,.task-controls,.task-scopes { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.task-panel-header { position:sticky; top:0; z-index:1; justify-content:space-between; padding:12px 20px; background:white; border-bottom:1px solid var(--line); }
+#task-body,#task-error { padding:18px 22px; overflow-wrap:anywhere; }
+#task-body section,.task-history,.task-controls,#task-body form { margin:18px 0; }
+#task-body label { display:grid; gap:5px; margin-bottom:12px; font-weight:600; }
+#task-body input,#task-body select,#task-body textarea { width:100%; }
+.task-register,.task-register .table-container { min-width:0; }
+.task-total,.task-entry time,.task-props dt,.task-table small,#task-total { color:var(--muted); font-size:13px; }
+.task-metrics button { text-align:left; color:inherit; }
+.task-metrics button[aria-pressed=true],.task-scopes button[aria-pressed=true] { background:var(--navy); color:white; }
+.task-metrics button[aria-pressed=true] .metric-label { color:white; }
+.task-scopes { margin:12px 0; }
+.task-scopes button { padding:7px 12px; border:1px solid var(--line); border-radius:6px; }
+.task-filters { margin:12px 0; }
+.task-table { min-width:650px; }
+.task-table small { display:block; }
+.task-table .text-btn { overflow-wrap:anywhere; }
+.task-pager { justify-content:flex-end; margin-top:12px; }
+.task-title { margin:12px 0 6px; font-size:23px; }
+.task-copy,.task-entry p { white-space:pre-wrap; }
+.task-props { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding:12px; background:var(--canvas); border-radius:7px; }
+.task-props dd { margin:0; }
+.task-entry { border-top:1px solid var(--line); margin-top:8px; padding-top:8px; }
+.task-history summary { font-weight:600; }
+@media(max-width:700px) {
+  #task-panel { width:100%; }
+  .task-table { min-width:0; }
+  .task-table thead { display:none; }
+  .task-table tr { display:grid; grid-template-columns:1fr 1fr; gap:5px; padding:10px; border-bottom:1px solid var(--line); }
+  .task-table td { border:0; padding:0; overflow-wrap:anywhere; }
+  .task-table td:first-child { grid-column:1/-1; }
+  .task-filters select { max-width:100%; }
+}
