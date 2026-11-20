@@ -19,6 +19,7 @@ import { createRemarksRouter } from './routes/remarks.js';
 import { createNotificationsRouter } from './routes/notifications.js';
 import { createReportsRouter } from './routes/reports.js';
 import { createTasksRouter } from './routes/tasks.js';
+import { createCompanyPhotosRouter } from './routes/company-photos.js';
 import { createSearchRouter } from './routes/search.js';
 import { createImportRouter } from './routes/import.js';
 import { createAiRouter } from './routes/ai.js';
@@ -78,6 +79,7 @@ export function createApp({ db = openDatabase(), cfg = config } = {}) {
   app.use('/api', createNotificationsRouter({ db }));
   app.use('/api', createReportsRouter({ db }));
   app.use('/api/tasks', createTasksRouter({ db }));
+  app.use('/api/company/photos', createCompanyPhotosRouter(cfg));
   app.use('/api', createSearchRouter({ db }));
   app.use('/api', createImportRouter({ db }));
   app.use('/api', createAiRouter({ db }));

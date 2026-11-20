@@ -183,8 +183,10 @@ table { border-collapse: collapse; }
 .project .section-label { margin-bottom: 6px; }
 .gallery-empty { display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); border: 1px dashed #b8c6d0; border-radius: 6px; padding: 24px 12px; margin-top: 14px; }
 #project-gallery { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit,minmax(min(200px,100%),1fr)); }
-#project-gallery:not(:empty) + .gallery-empty { display: none; }
+#project-gallery:not(:empty) { margin-top: 14px; }
+#project-gallery button { padding: 0; border-radius: var(--radius); overflow: hidden; background: var(--canvas); }
 #project-gallery img, #project-photo img { display: block; max-width: 100%; height: auto; margin: auto; }
+#project-gallery img { width: 100%; height: clamp(150px, 18vw, 230px); object-fit: cover; }
 .footer { background: white; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 12px 3.5vw; font-size: 12px; color: var(--muted); }
 #login-page { min-height: 100dvh; display: grid; place-items: center; padding: 20px; border-top: 4px solid var(--navy); }
 .login-container { width: min(100%, 420px); border: 1px solid var(--line); border-radius: 13px; background: white; padding: clamp(22px,4vw,36px); }

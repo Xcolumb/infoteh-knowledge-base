@@ -491,7 +491,16 @@
         <div class="company-head"><img class="brand" src="img/expo-m.png" alt="ЭКСПО-М"><div><h1>ООО «ЭКСПО-М»</h1><p>Строительные и монтажные работы</p></div></div>
         <div class="company-grid"><article class="card"><h2>О компании</h2><p>ООО «ЭКСПО-М» — строительная организация, осуществляющая строительные и монтажные работы. Компания участвует в реализации проектов на объектах строительства.</p></article>
         <article class="card project"><p class="section-label">Текущий проект</p><h2>Строительство Регионального центра обработки данных (РЦОД)</h2><p class="location"><svg class="icon" aria-hidden="true"><use href="#i-pin"></use></svg>Саратовская область, Балаковский район</p><p>ООО «ЭКСПО-М» участвует в строительстве Регионального центра обработки данных в Балаковском районе Саратовской области, выполняя строительно-монтажные работы.</p></article></div>
-        <section class="card gallery"><h2>Фотографии строительства</h2><div id="project-gallery"></div><div class="gallery-empty"><svg class="icon" aria-hidden="true"><use href="#i-photo"></use></svg>Фотографии проекта пока не размещены</div></section>
+        <section class="card gallery">
+          <div class="section-header-row"><h2>Фотографии строительства</h2>
+            <div data-permission="admin" hidden>
+              <button type="button" id="project-photo-add" class="btn btn-primary">Загрузить фото</button>
+              <input id="project-photo-file" type="file" accept="image/jpeg,image/png" hidden>
+            </div>
+          </div>
+          <div id="project-gallery"></div>
+          <p id="project-gallery-status" class="gallery-empty" role="status" hidden></p>
+        </section>
       </section>
 
       <section id="completeness-page" class="content-section hidden">

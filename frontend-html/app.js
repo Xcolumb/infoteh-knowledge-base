@@ -284,6 +284,9 @@ async function navigateTo(page) {
   }
 
   switch (page) {
+    case 'about':
+      await loadProjectPhotos();
+      break;
     case 'objects':
       await loadPtoObjects();
       renderObjects();
@@ -2558,6 +2561,57 @@ function renderRowsTable(rows) {
 
 // --- Инициализация ---
 
+let galleryRequest = 0;
+const galleryUrl = API_BASE + '/company/photos';
+
+async function loadProjectPhotos() {
+  const request = ++galleryRequest;
+  const message = $('project-gallery-status');
+  try {
+    const { photos } = await apiJson(galleryUrl);
+    if (request !== galleryRequest) return;
+    const buttons = photos.map((name, index) => {
+      const img = document.createElement('img');
+      img.src = galleryUrl + '/' + encodeURIComponent(name);
+      img.alt = 'Строительство РЦОД — фото ' + (index + 1);
+      img.loading = 'lazy';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.append(img);
+      return button;
+    });
+    $('project-gallery').replaceChildren(...buttons);
+    message.textContent = photos.length ? '' : 'Фотографии проекта пока не размещены';
+    message.hidden = photos.length > 0;
+  } catch (error) {
+    if (request !== galleryRequest || error instanceof AuthError) return;
+    message.textContent = 'Не удалось загрузить фотографии. ' + error.message;
+    message.hidden = false;
+  }
+}
+
+async function uploadProjectPhoto(event) {
+  const input = event.currentTarget;
+  const file = input.files[0];
+  if (!file) return;
+  const button = $('project-photo-add');
+  button.disabled = true;
+  button.textContent = 'Загрузка…';
+  try {
+    const form = new FormData();
+    form.append('photo', file);
+    await apiJson(galleryUrl, { method: 'POST', body: form });
+    await loadProjectPhotos();
+    toast('Фото загружено');
+  } catch (error) {
+    if (!(error instanceof AuthError)) toast(error.message, 'error');
+  } finally {
+    input.value = '';
+    button.disabled = false;
+    button.textContent = 'Загрузить фото';
+  }
+}
+
 function setupEventListeners() {
   $('login-form').addEventListener('submit', handleLogin);
   $('logout-btn').addEventListener('click', handleLogout);
@@ -2616,6 +2670,8 @@ function setupEventListeners() {
   document.querySelector('[data-action="notifications"]').addEventListener('click', openNotifications);
   $('instruction-search').addEventListener('input', renderInstructions);
   $('instruction-kind').addEventListener('change', renderInstructions);
+  $('project-photo-add').addEventListener('click', () => $('project-photo-file').click());
+  $('project-photo-file').addEventListener('change', uploadProjectPhoto);
   $('project-gallery').addEventListener('click', (event) => {
     const photo = event.target.closest('button')?.querySelector('img');
     if (!photo) return;

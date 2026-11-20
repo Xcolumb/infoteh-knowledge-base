@@ -185,7 +185,14 @@ try {
     assert.equal(await el('nav-add-article').isVisible(), content);
     assert.equal(await el('nav-users').isVisible(), admin);
     await el('drawer-close').click();
+    await go('about');
+    assert.equal(await el('project-photo-add').isVisible(), admin);
     if (admin) {
+      const jpeg = await page.evaluate(() => document.createElement('canvas').toDataURL('image/jpeg').split(',')[1]);
+      const picker = page.waitForEvent('filechooser');
+      await el('project-photo-add').click();
+      await (await picker).setFiles({ name: 'объект.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(jpeg, 'base64') });
+      await page.locator('#project-gallery img').evaluate(img => img.decode());
       await go('users');
       await el('users-page').getByRole('heading', { name: 'Управление сотрудниками' }).waitFor();
     } else {
@@ -196,6 +203,13 @@ try {
     }
     await logout();
   }
+  await login('PTO901', PASSWORDS.pto2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await go('about');
+  assert.equal(await el('project-photo-add').isVisible(), false);
+  await page.locator('#project-gallery button').click();
+  await page.locator('#project-photo img').evaluate(img => img.decode());
+  await fits('Фотография объекта на телефоне');
   assert.deepEqual(errors, []);
   console.log('Пройдены четыре роли, формы, поиск, уведомления, материалы, компания и смена сессии.');
 } finally {
