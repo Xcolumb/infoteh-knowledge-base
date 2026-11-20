@@ -1,8 +1,8 @@
 {
   "name": "infoteh-balakovo-knowledge-base",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
-  "description": "База знаний и реестр ПТО ООО «ИНФОТЕХ БАЛАКОВО»",
+  "description": "Информационная система ПТО для ООО «ЭКСПО-М»: объекты, документы, комплектность ИД, замечания, задачи, отчёты и база знаний",
   "type": "module",
   "scripts": {
     "start": "node server.js",
