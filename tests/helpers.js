@@ -57,7 +57,7 @@ export function seedData(db) {
   return { byTab, objectA, objectB };
 }
 
-function createClient(base) {
+export function createClient(base) {
   let cookie = '';
   let csrf = '';
 
@@ -139,7 +139,7 @@ export async function setup(options = {}) {
     dir,
     ...seeded,
     async close() {
-      server.close();
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
       db.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
