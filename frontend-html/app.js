@@ -139,19 +139,10 @@ function forceLogin(message) {
 }
 
 function applyRoleVisibility() {
-  const role = state.user ? state.user.role : '';
-  const canManageContent = ['Администратор', 'Старший монтажник'].includes(role);
-  const canManagePto = ['Администратор', 'Инженер ПТО'].includes(role);
-  const isAdmin = role === 'Администратор';
-
-  document.querySelectorAll('.nav-btn').forEach((button) => {
-    const page = button.dataset.page;
-    if (page === 'add-article' || page === 'vidy-rabot' || page === 'raboty') {
-      button.classList.toggle('hidden', !canManageContent);
-    }
-    if (page === 'users') button.classList.toggle('hidden', !isAdmin);
+  const canManagePto = state.permissions.pto;
+  document.querySelectorAll('[data-permission]').forEach((element) => {
+    element.hidden = !state.permissions[element.dataset.permission];
   });
-
   $('show-add-doc').classList.toggle('hidden', !canManagePto);
   $('show-import').classList.toggle('hidden', !canManagePto);
   $('show-add-object').classList.toggle('hidden', !canManagePto);
@@ -161,10 +152,12 @@ function applyRoleVisibility() {
 
 function renderUserHeader() {
   if (!state.user) return;
-  $('user-name').textContent = state.user.fullName;
-  $('user-role').textContent = state.user.role;
-  $('mobile-user-name').textContent = state.user.fullName;
-  $('mobile-user-role').textContent = state.user.role;
+  const names = state.user.fullName.split(/\s+/);
+  $('profile-btn').textContent = names.slice(0, 2).map((part) => part[0]).join('');
+  $('profile-btn').title = state.user.fullName + ' · ' + state.user.role;
+  $('dashboard-role').textContent = state.user.role;
+  $('greeting').textContent = 'Здравствуйте, ' + (names[1] || names[0]);
+  $('today').textContent = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', weekday: 'long' }).format(new Date());
   $('article-author').textContent = state.user.fullName;
 }
 
@@ -242,6 +235,10 @@ async function showApp() {
 
 const PAGES = {
   dashboard: 'dashboard-page',
+  objects: 'objects-page',
+  executive: 'pto-page',
+  instructions: 'instructions-page',
+  about: 'about-page',
   pto: 'pto-page',
   completeness: 'completeness-page',
   remarks: 'remarks-page',
@@ -256,8 +253,17 @@ const PAGES = {
 async function navigateTo(page) {
   if (!state.user) return;
 
+  const selected = $('nav-' + page);
+  if (!selected || selected.closest('[hidden]')) return;
+  const previous = state.currentPage;
+  if (previous === 'executive' && page !== previous) state.ptoFilters.type = state.registryType || 'all';
+  if (page === 'executive' && page !== previous) state.registryType = state.ptoFilters.type;
+  state.currentPage = page;
+  $('section-title').textContent = selected.textContent.trim();
+  hideSearch();
   document.querySelectorAll('.nav-btn').forEach((button) => {
-    button.classList.toggle('active', button.dataset.page === page);
+    if (button === selected) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
   });
 
   Object.values(PAGES).forEach((id) => $(id).classList.add('hidden'));
@@ -265,7 +271,29 @@ async function navigateTo(page) {
   const target = PAGES[page] || PAGES.dashboard;
   $(target).classList.remove('hidden');
 
+  const heading = $(target).querySelector('h1');
+  heading.tabIndex = -1;
+  heading.focus({ preventScroll: true });
+  if (page === 'pto' || page === 'executive') {
+    const executive = page === 'executive';
+    if (executive) state.ptoFilters.type = 'Исполнительная документация';
+    $('pto-filter-type').value = state.ptoFilters.type;
+    $('pto-filter-type').disabled = executive;
+    heading.textContent = executive ? 'Исполнительная документация' : 'Реестр документов ПТО';
+  }
+
   switch (page) {
+    case 'objects':
+      await loadPtoObjects();
+      renderObjects();
+      break;
+    case 'instructions':
+      fillInstructionKinds();
+      renderInstructions();
+      break;
+    case 'executive':
+      await loadPtoObjects();
+      break;
     case 'dashboard':
       await loadDashboard();
       break;
@@ -304,7 +332,7 @@ async function navigateTo(page) {
       break;
   }
 
-  window.scrollTo(0, 0);
+  if (state.currentPage === page) window.scrollTo(0, 0);
 }
 
 // --- Каталог знаний ---
@@ -365,9 +393,9 @@ function renderArticles() {
     return;
   }
 
-  container.innerHTML = filtered.map((article) => `
-    <div class="article-card" data-id="${article.id}">
-      <div class="article-header" onclick="toggleArticle(${article.id})">
+  const renderCard = (article) => `
+    <details class="article-card">
+      <summary class="article-header">
         <div class="article-header-content">
           <div class="article-badges">
             ${article.vidName ? `<span class="badge badge-vid">${escapeHtml(article.vidName)}</span>` : ''}
@@ -381,8 +409,8 @@ function renderArticles() {
             <span>Обновлено: ${formatDate(article.updatedAt)}</span>
           </div>
         </div>
-        <span class="article-expand-icon">▼</span>
-      </div>
+        <span aria-hidden="true">⌄</span>
+      </summary>
       <div class="article-content">
         <div class="article-text">${escapeHtml(article.content || '')}</div>
         ${article.keywords ? `<div class="article-keywords">${article.keywords.split(',').map((word) => `<span>${escapeHtml(word.trim())}</span>`).join('')}</div>` : ''}
@@ -400,13 +428,17 @@ function renderArticles() {
             ${state.permissions.admin ? `<button class="btn btn-danger btn-sm" onclick="confirmDeleteArticle(${article.id})">Удалить</button>` : ''}
           </div>` : ''}
       </div>
-    </div>
-  `).join('');
-}
-
-function toggleArticle(id) {
-  const card = document.querySelector(`.article-card[data-id="${id}"]`);
-  if (card) card.classList.toggle('expanded');
+    </details>`;
+  const groups = new Map();
+  for (const article of filtered) {
+    const kind = article.vidName || 'Без вида работ';
+    if (!groups.has(kind)) groups.set(kind, []);
+    groups.get(kind).push(article);
+  }
+  container.innerHTML = [...groups].map(([kind, articles]) => `
+    <section class="material-group"><h2>${escapeHtml(kind)}</h2>
+      ${articles.map(renderCard).join('')}
+    </section>`).join('');
 }
 
 function openArticleModal(id) {
@@ -484,7 +516,7 @@ async function handleAddArticle(event) {
 
   try {
     await apiJson(`${API_BASE}/articles`, { method: 'POST', body: formData });
-    $('article-success').textContent = 'Инструкция опубликована';
+    $('article-success').textContent = 'Статья опубликована';
     $('article-success').classList.remove('hidden');
 
     ['article-title', 'article-keywords', 'article-content'].forEach((id) => { $(id).value = ''; });
@@ -507,7 +539,7 @@ function openEditArticle(id) {
   if (!article) return;
 
   openModal(`
-    <h2>Редактировать инструкцию</h2>
+    <h2>Редактировать статью</h2>
     <form id="edit-article-form" class="modal-form">
       <div class="form-group">
         <label for="edit-article-title">Название <span class="required">*</span></label>
@@ -524,7 +556,7 @@ function openEditArticle(id) {
         </div>
       </div>
       <div class="form-group">
-        <label for="edit-article-content">Текст инструкции <span class="required">*</span></label>
+        <label for="edit-article-content">Текст статьи <span class="required">*</span></label>
         <textarea id="edit-article-content" rows="10" required>${escapeHtml(article.content || '')}</textarea>
       </div>
       <div class="form-group">
@@ -554,7 +586,7 @@ function openEditArticle(id) {
       await apiJson(`${API_BASE}/articles/${article.id}`, { method: 'PUT', body: formData });
       closeModal();
       await loadArticles();
-      toast('Инструкция сохранена');
+      toast('Статья сохранена');
     } catch (error) {
       if (error instanceof AuthError) return;
       toast(error.message, 'error');
@@ -563,12 +595,12 @@ function openEditArticle(id) {
 }
 
 async function confirmDeleteArticle(id) {
-  if (!confirm('Удалить инструкцию? Действие необратимо.')) return;
+  if (!confirm('Удалить статью? Действие необратимо.')) return;
 
   try {
     await apiJson(`${API_BASE}/articles/${id}`, { method: 'DELETE' });
     await loadArticles();
-    toast('Инструкция удалена');
+    toast('Статья удалена');
   } catch (error) {
     if (error instanceof AuthError) return;
     toast(error.message, 'error');
@@ -978,7 +1010,7 @@ async function openAccessModal(id) {
     <p class="field-hint">Инженер ПТО видит документы только назначенных объектов. Администратор видит все объекты.</p>
     <div class="form-group">
       ${objects.length ? objects.map((object) => `
-        <label class="pto-checkbox" style="color:#E2E8F0">
+        <label class="pto-checkbox">
           <input type="checkbox" class="access-object" value="${object.id}" ${selected.has(object.id) ? 'checked' : ''}>
           <span>${escapeHtml(object.name)}</span>
         </label>
@@ -1399,6 +1431,7 @@ async function openPtoForm(id) {
       await loadPtoDocuments();
       const savedId = doc ? doc.id : result.data.id;
       await openPtoDoc(savedId);
+      if (state.currentPage === 'dashboard') await loadDashboard();
       toast('Документ сохранён');
     } catch (error) {
       if (error instanceof AuthError) return;
@@ -1497,61 +1530,93 @@ async function deleteObject(id) {
 
 // --- Панель ПТО ---
 
+let dashboardRequest = 0;
+
 async function loadDashboard() {
-  renderObjectSelects();
+  const request = ++dashboardRequest;
+  const object = $('dashboard-object').value;
+  const suffix = object && object !== 'all' ? '&objectId=' + encodeURIComponent(object) : '';
+  const [summary, docs, remarks, notices] = await Promise.all([
+    apiJsonSafe(API_BASE + '/reports/summary?' + suffix.slice(1)),
+    apiJsonSafe(API_BASE + '/pto?limit=5' + suffix),
+    apiJsonSafe(API_BASE + '/remarks?limit=100' + suffix),
+    apiJsonSafe(API_BASE + '/notifications?limit=3')
+  ]);
+  if (request !== dashboardRequest) return;
+  const stats = summary?.data;
+  const measures = [
+    ['Документов', stats?.total, 'doc'], ['В работе', stats?.inWork, 'clock'],
+    ['Просрочено', stats?.overdue, 'calendar'], ['Открытых замечаний', stats?.remarksOpen, 'remarks']
+  ];
+  $('dashboard-stats').innerHTML = measures.map(([label, n, icon]) =>
+    `<div class="stat-card"><div class="metric-label">${label}${uiIcon(icon)}</div><strong class="number">${n ?? '—'}</strong></div>`
+  ).join('');
+  const empty = (response, label) => '<p class="compact-empty">' + (response ? label : 'Не удалось загрузить данные') + '</p>';
+  $('dashboard-docs').innerHTML = (docs?.data || []).map((doc) => `
+    <div class="work-row"><span class="row-icon">${uiIcon('doc')}</span><div class="row-main">
+    <button class="text-btn" onclick="openPtoDoc(${doc.id})">${escapeHtml(doc.title)}</button>
+    <small>${escapeHtml(doc.objectName || 'Без объекта')}</small></div>
+    <span class="status-badge ${ptoStatusClass(doc.status)}">${escapeHtml(doc.status)}</span>
+    <time>${formatDate(doc.dueDate)}</time></div>`).join('') || empty(docs, 'Документов пока нет');
+  const open = (remarks?.data || []).filter((r) => !['Закрыто', 'Отклонено', 'Устранено'].includes(r.status)).slice(0, 4);
+  $('dashboard-remarks').innerHTML = open.map((r) => `<div class="work-row"><span class="row-icon">${uiIcon('remarks')}</span>
+    <div class="row-main"><button class="text-btn" onclick="openRemarkDetail(${r.id})">${escapeHtml(r.description)}</button>
+    <small>${escapeHtml(r.number || '№' + r.id)}</small></div><time>${formatDate(r.dueDate)}</time></div>`).join('') || empty(remarks, 'Открытых замечаний нет');
+  $('dashboard-notices').innerHTML = (notices?.data || []).slice(0, 3).map((n) => `<div class="work-row"><span class="row-icon">${uiIcon('bell')}</span>
+    <div class="row-main">${escapeHtml(n.text)}<small>${formatDateTime(n.createdAt)}</small></div></div>`).join('') || empty(notices, 'Уведомлений нет');
+}
 
-  const objectId = $('dashboard-object').value || 'all';
-  const query = objectId !== 'all' ? `?objectId=${objectId}` : '';
+function uiIcon(name) {
+  return `<svg class="icon" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+}
 
-  const summary = await apiJsonSafe(`${API_BASE}/reports/summary${query}`);
-  if (!summary) return;
+function fillInstructionKinds() {
+  const select = $('instruction-kind');
+  const value = select.value;
+  select.replaceChildren(new Option('Все виды работ', 'all'), ...state.vidy.map((v) => new Option(v.name, v.id)));
+  select.value = [...select.options].some((o) => o.value === value) ? value : 'all';
+}
 
-  const data = summary.data;
-  $('dashboard-stats').innerHTML = `
-    <div class="stat-card"><div class="number">${data.total}</div><div class="label">Всего документов</div></div>
-    <div class="stat-card"><div class="number blue">${data.inWork}</div><div class="label">В работе</div></div>
-    <div class="stat-card"><div class="number green">${data.approved}</div><div class="label">Утверждено</div></div>
-    <div class="stat-card"><div class="number ${data.overdue ? 'red' : 'yellow'}">${data.overdue}</div><div class="label">Просрочено</div></div>
-    <div class="stat-card"><div class="number ${data.remarksOpen ? 'red' : ''}">${data.remarksOpen}</div><div class="label">Незакрытых замечаний</div></div>
-    <div class="stat-card"><div class="number ${data.setsIncomplete ? 'red' : ''}">${data.setsIncomplete}</div><div class="label">Неполных комплектов</div></div>
-    <div class="stat-card"><div class="number">${data.setsComplete}</div><div class="label">Комплектов готово</div></div>
-    <div class="stat-card"><div class="number">${data.onTimePercent === null ? '—' : data.onTimePercent + '%'}</div><div class="label">Сдано в срок</div></div>
-  `;
+function renderInstructions() {
+  const query = $('instruction-search').value.trim().toLocaleLowerCase('ru');
+  const kind = $('instruction-kind').value;
+  const groups = new Map();
+  for (const work of state.raboty) {
+    if (!work.instruction?.trim() || (kind !== 'all' && String(work.vidId) !== kind)) continue;
+    if (![work.name, work.instruction, work.vidName].join(' ').toLocaleLowerCase('ru').includes(query)) continue;
+    const label = work.vidName || 'Без вида работ';
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(work);
+  }
+  $('instruction-list').innerHTML = [...groups].map(([label, works]) => `<section class="card"><h2>${escapeHtml(label)}</h2>
+    ${works.map((work) => `<details class="instruction"><summary>${escapeHtml(work.name)}</summary>
+      <div class="article-text">${escapeHtml(work.instruction)}</div>
+      ${state.articles.filter((a) => a.rabotaId === work.id).map((a) =>
+        `<button class="text-btn related" onclick="openArticleModal(${a.id})">${uiIcon('book')}${escapeHtml(a.title)}</button>`).join('')}
+    </details>`).join('')}</section>`).join('') || '<p class="empty-state">Инструкции не найдены</p>';
+}
 
-  const overdueDocs = await apiJsonSafe(`${API_BASE}/pto?overdue=1&limit=6${objectId !== 'all' ? '&objectId=' + objectId : ''}`);
-  const overdueContainer = $('dashboard-overdue');
-  const docs = overdueDocs ? overdueDocs.data : [];
-  overdueContainer.innerHTML = docs.length
-    ? docs.map((doc) => `
-        <div class="compact-item">
-          <button onclick="openPtoDoc(${doc.id})">${escapeHtml(doc.title)}</button>
-          <span class="compact-date">${formatDate(doc.dueDate)}</span>
-        </div>`).join('')
-    : '<div class="compact-empty">Просроченных документов нет</div>';
-
-  const remarksData = await apiJsonSafe(`${API_BASE}/remarks?limit=100${objectId !== 'all' ? '&objectId=' + objectId : ''}`);
-  const openRemarks = remarksData ? remarksData.data.filter((remark) => !['Закрыто', 'Отклонено', 'Устранено'].includes(remark.status)) : [];
-  const remarksContainer = $('dashboard-remarks');
-  remarksContainer.innerHTML = openRemarks.length
-    ? openRemarks.slice(0, 6).map((remark) => `
-        <div class="compact-item">
-          <button onclick="openRemarkDetail(${remark.id})">${escapeHtml(remark.number || '№' + remark.id)}: ${escapeHtml(remark.description.slice(0, 60))}</button>
-          <span class="compact-date">${formatDate(remark.dueDate)}</span>
-        </div>`).join('')
-    : '<div class="compact-empty">Незакрытых замечаний нет</div>';
+let searchRequest = 0;
+function hideSearch() {
+  ++searchRequest;
+  $('global-search-results').hidden = true;
+  $('top-search').classList.remove('expanded');
 }
 
 async function runGlobalSearch() {
   const query = $('global-search').value.trim();
   const container = $('global-search-results');
 
+  const request = ++searchRequest;
+  container.hidden = false;
   if (query.length < 2) {
     container.innerHTML = '<div class="compact-empty">Введите минимум 2 символа</div>';
     return;
   }
 
   const data = await apiJsonSafe(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
-  if (!data) return;
+  if (request !== searchRequest) return;
+  if (!data) { container.textContent = 'Не удалось выполнить поиск'; return; }
 
   container.replaceChildren();
   if (!data.data.length) {
@@ -1568,11 +1633,11 @@ async function runGlobalSearch() {
     button.className = 'search-result';
     button.textContent = item.title;
     const isDocument = item.kind === 'document';
-    button.addEventListener('click', () => isDocument ? openPtoDoc(item.id) : openArticleModal(item.id));
+    button.addEventListener('click', () => { hideSearch(); return isDocument ? openPtoDoc(item.id) : openArticleModal(item.id); });
 
     const detail = document.createElement('span');
     detail.className = 'search-kind';
-    detail.textContent = isDocument ? 'Документ ПТО' : 'Инструкция';
+    detail.textContent = isDocument ? 'Документ ПТО' : 'Статья';
     if (item.fragment) {
       detail.append(' · ');
       let cursor = 0;
@@ -2184,12 +2249,14 @@ async function openNotifications() {
 async function markNotificationRead(id) {
   await apiJsonSafe(`${API_BASE}/notifications/${id}/read`, { method: 'POST' });
   await refreshNotificationBadge();
+  if (state.currentPage === 'dashboard') await loadDashboard();
   await openNotifications();
 }
 
 async function markAllNotificationsRead() {
   await apiJsonSafe(`${API_BASE}/notifications/read-all`, { method: 'POST' });
   await refreshNotificationBadge();
+  if (state.currentPage === 'dashboard') await loadDashboard();
   closeModal();
 }
 
@@ -2197,7 +2264,8 @@ async function markAllNotificationsRead() {
 
 function openPasswordForm() {
   openModal(`
-    <h2>Смена пароля</h2>
+    <h2>Профиль</h2><p>${escapeHtml(state.user.fullName)} · ${escapeHtml(state.user.role)}</p>
+    <h3 class="profile-subtitle">Смена пароля</h3>
     <form id="password-form" class="modal-form">
       <div id="password-form-error" class="error-message hidden"></div>
       <div class="form-group">
@@ -2484,7 +2552,7 @@ function renderRowsTable(rows) {
 function setupEventListeners() {
   $('login-form').addEventListener('submit', handleLogin);
   $('logout-btn').addEventListener('click', handleLogout);
-  $('mobile-logout-btn').addEventListener('click', handleLogout);
+
 
   $('toggle-password').addEventListener('click', () => {
     const input = $('password');
@@ -2500,14 +2568,56 @@ function setupEventListeners() {
 
   document.querySelectorAll('.nav-btn').forEach((button) => {
     button.addEventListener('click', () => {
+      $('drawer').close();
       navigateTo(button.dataset.page);
-      closeMobileMenu();
     });
   });
 
-  $('nav-toggle').addEventListener('click', openMobileMenu);
-  $('mobile-menu-close').addEventListener('click', closeMobileMenu);
-  $('mobile-menu-overlay').addEventListener('click', closeMobileMenu);
+  const drawer = $('drawer');
+  $('nav-toggle').addEventListener('click', () => {
+    hideSearch();
+    drawer.showModal();
+    $('nav-toggle').setAttribute('aria-expanded', 'true');
+    document.body.classList.add('menu-open');
+    $('drawer-close').focus();
+  });
+  drawer.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab') return;
+    const buttons = [...drawer.querySelectorAll('button')].filter((button) => button.getClientRects().length);
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+  drawer.addEventListener('close', () => {
+    document.body.classList.remove('menu-open');
+    $('nav-toggle').setAttribute('aria-expanded', 'false');
+  });
+  $('drawer-close').addEventListener('click', () => drawer.close());
+  drawer.addEventListener('click', (event) => {
+    if (event.target === drawer && event.clientX > drawer.getBoundingClientRect().right) drawer.close();
+  });
+  document.querySelectorAll('[data-go]').forEach((button) => button.addEventListener('click', () => navigateTo(button.dataset.go)));
+  document.querySelector('[data-action="document"]').addEventListener('click', () => openPtoForm());
+  document.querySelector('[data-action="notifications"]').addEventListener('click', openNotifications);
+  $('instruction-search').addEventListener('input', renderInstructions);
+  $('instruction-kind').addEventListener('change', renderInstructions);
+  $('project-gallery').addEventListener('click', (event) => {
+    const photo = event.target.closest('button')?.querySelector('img');
+    if (!photo) return;
+    openModal('<figure id="project-photo"></figure>');
+    $('project-photo').append(photo.cloneNode());
+    if (photo.alt) {
+      const caption = document.createElement('figcaption');
+      caption.textContent = photo.alt;
+      $('project-photo').append(caption);
+    }
+  });
   $('notifications-btn').addEventListener('click', openNotifications);
   $('profile-btn').addEventListener('click', openPasswordForm);
   $('modal-close').addEventListener('click', closeModal);
@@ -2522,7 +2632,12 @@ function setupEventListeners() {
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
-      closeMobileMenu();
+      if (drawer.open) return;
+      if (!$('global-search-results').hidden || $('top-search').classList.contains('expanded')) {
+        hideSearch();
+        $('global-search-btn').focus();
+        return;
+      }
       if (!document.getElementById('viewer-modal').classList.contains('hidden')) {
         closeViewer();
         return;
@@ -2606,9 +2721,17 @@ function setupEventListeners() {
   // Панель
   $('dashboard-refresh').addEventListener('click', loadDashboard);
   $('dashboard-object').addEventListener('change', loadDashboard);
-  $('global-search-btn').addEventListener('click', runGlobalSearch);
-  $('global-search').addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') runGlobalSearch();
+  $('top-search').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (window.matchMedia('(max-width: 700px)').matches && !$('top-search').classList.contains('expanded')) {
+      $('top-search').classList.add('expanded');
+      $('global-search').focus();
+      return;
+    }
+    runGlobalSearch();
+  });
+  document.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest('#top-search, #global-search-results')) hideSearch();
   });
 
   // Комплектность
@@ -2641,25 +2764,6 @@ function setupEventListeners() {
   $('report-documents-csv').addEventListener('click', () => exportReport('documents'));
   $('report-remarks-csv').addEventListener('click', () => exportReport('remarks'));
 
-  window.addEventListener('resize', () => {
-    if (window.innerWidth > 768) closeMobileMenu();
-  });
-}
-
-function openMobileMenu() {
-  $('mobile-menu').classList.add('open');
-  $('mobile-menu-overlay').classList.add('open');
-  $('mobile-menu').setAttribute('aria-hidden', 'false');
-  $('nav-toggle').setAttribute('aria-expanded', 'true');
-  document.body.classList.add('menu-open');
-}
-
-function closeMobileMenu() {
-  $('mobile-menu').classList.remove('open');
-  $('mobile-menu-overlay').classList.remove('open');
-  $('mobile-menu').setAttribute('aria-hidden', 'true');
-  $('nav-toggle').setAttribute('aria-expanded', 'false');
-  document.body.classList.remove('menu-open');
 }
 
 document.addEventListener('DOMContentLoaded', async () => {

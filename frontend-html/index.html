@@ -3,23 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Информационная система ПТО — ООО «ИНФОТЕХ БАЛАКОВО»</title>
-  <link rel="icon" type="image/x-icon" href="img/favico.png">
+  <title>Информационная система ПТО — ООО «ЭКСПО-М»</title>
+  <link rel="icon" type="image/png" href="img/expo-m.png">
   <link rel="stylesheet" href="styles.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&family=Varela&display=swap" rel="stylesheet">
 </head>
 <body>
+  <svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></symbol><symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol><symbol id="i-search" viewBox="0 0 24 24"><path d="M16 16l5 5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0"/></symbol><symbol id="i-bell" viewBox="0 0 24 24"><path d="M5 16l2-3V9a5 5 0 0 1 10 0v4l2 3v1H5zM10 20h4"/></symbol><symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10h-6v-7H9v7H3z"/></symbol><symbol id="i-doc" viewBox="0 0 24 24"><path d="M6 2h8l5 5v15H6zM14 2v6h5M9 12h7M9 16h7"/></symbol><symbol id="i-building" viewBox="0 0 24 24"><path d="M3 21V7l10-4v18M13 10l8 2v9M1 21h22M6 9v2m4-4v2m-4 5v2m4-4v2m6 1v2"/></symbol><symbol id="i-stack" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4-9 4zM3 12l9 4 9-4M3 17l9 4 9-4"/></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM7 12l3 3 7-7"/></symbol><symbol id="i-remarks" viewBox="0 0 24 24"><path d="M3 4h18v13H9l-6 4zM7 9h10M7 12h6"/></symbol><symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18M7 17v-5m5 5V7m5 10v-8"/></symbol><symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6Q7 3 2 5v14q5-2 10 1 5-3 10-1V5q-5-2-10 1v14"/></symbol><symbol id="i-tools" viewBox="0 0 24 24"><path d="m3 20 9-9a6 6 0 0 1 7-8l-4 4 2 2 4-4a6 6 0 0 1-7 8l-9 9z"/></symbol><symbol id="i-users" viewBox="0 0 24 24"><path d="M15 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M3 21v-2a8 8 0 0 1 16 0v2M18 4a4 4 0 0 1 0 7"/></symbol><symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-5-5 5 5-5 5"/></symbol><symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></symbol><symbol id="i-calendar" viewBox="0 0 24 24"><path d="M3 5h18v16H3zM7 2v6m10-6v6M3 10h18"/></symbol><symbol id="i-clock" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 6v6l4 2"/></symbol><symbol id="i-photo" viewBox="0 0 24 24"><path d="M3 4h18v16H3zM3 17l6-6 4 4 3-3 5 5M15 8h1"/></symbol><symbol id="i-pin" viewBox="0 0 24 24"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0M14 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0"/></symbol><symbol id="i-exit" viewBox="0 0 24 24"><path d="M9 3H4v18h5M10 12h11m-5-5 5 5-5 5"/></symbol></svg>
   <div id="login-page" class="page">
     <div class="login-container">
       <div class="login-header">
         <div class="logo">
-          <img src="img/logo.png" alt="Логотип">
+          <img class="brand" src="img/expo-m.png" alt="ЭКСПО-М">
         </div>
         <h1>Информационная система ПТО</h1>
         <p class="login-subtitle">Документы · Комплектность ИД · Замечания · База знаний</p>
-        <p class="login-org">ООО «ИНФОТЕХ БАЛАКОВО»</p>
+        <p class="login-org">ООО «ЭКСПО-М»</p>
       </div>
       
       <form id="login-form" class="login-form">
@@ -27,14 +25,14 @@
         
         <div class="form-group">
           <label for="tab-number">Табельный номер</label>
-          <input type="text" id="tab-number" name="tabNumber" placeholder="Например: M002" required>
+          <input type="text" autocomplete="username" id="tab-number" name="tabNumber" placeholder="Например: M002" required>
         </div>
         
         <div class="form-group">
           <label for="password">Пароль</label>
           <div class="password-wrapper">
-            <input type="password" id="password" name="password" placeholder="Введите пароль" required>
-            <button type="button" id="toggle-password" class="toggle-password">👁️</button>
+            <input type="password" autocomplete="current-password" id="password" name="password" placeholder="Введите пароль" required>
+            <button type="button" aria-label="Показать или скрыть пароль" id="toggle-password" class="toggle-password">👁️</button>
           </div>
         </div>
         
@@ -45,81 +43,39 @@
   </div>
 
   <div id="app-page" class="page hidden">
-    <div class="mobile-menu-overlay" id="mobile-menu-overlay"></div>
-
-    <aside class="mobile-menu" id="mobile-menu" aria-label="Мобильное меню" aria-hidden="true">
-      <div class="mobile-menu-header">
-        <img src="img/logo.png" alt="ООО «ИНФОТЕХ БАЛАКОВО»" class="mobile-menu-logo">
-        <button type="button" class="mobile-menu-close" id="mobile-menu-close" aria-label="Закрыть меню">✕</button>
-      </div>
-
-      <div class="mobile-user">
-        <span id="mobile-user-name" class="mobile-user-name"></span>
-        <span id="mobile-user-role" class="mobile-user-role"></span>
-      </div>
-
-      <nav class="mobile-nav" aria-label="Мобильная навигация">
-        <button class="nav-btn active" data-page="dashboard">Панель ПТО</button>
-        <button class="nav-btn" data-page="pto">Документы ПТО</button>
-        <button class="nav-btn" data-page="completeness">Комплектность</button>
-        <button class="nav-btn" data-page="remarks">Замечания</button>
-        <button class="nav-btn" data-page="reports">Отчёты</button>
-        <button class="nav-btn" data-page="catalog">Каталог знаний</button>
-        <button class="nav-btn hidden" data-page="add-article">Добавить инструкцию</button>
-        <button class="nav-btn hidden" data-page="vidy-rabot">Виды работ</button>
-        <button class="nav-btn hidden" data-page="raboty">Работы</button>
-        <button class="nav-btn hidden" data-page="users">Сотрудники</button>
-      </nav>
-
-      <button type="button" class="btn-logout mobile-logout" id="mobile-logout-btn">Выйти</button>
-    </aside>
-
-    <header class="header">
-      <div class="header-content">
-        <div class="header-logo">
-          <img src="img/logo.png" alt="ООО «ИНФОТЕХ БАЛАКОВО»" class="header-logo-img">
-        </div>
-        
-        <nav class="nav" id="main-nav" aria-label="Основная навигация">
-          <button class="nav-btn active" data-page="dashboard" id="nav-dashboard">Панель ПТО</button>
-          <button class="nav-btn" data-page="pto" id="nav-pto">Документы ПТО</button>
-          <button class="nav-btn" data-page="completeness" id="nav-completeness">Комплектность</button>
-          <button class="nav-btn" data-page="remarks" id="nav-remarks">Замечания</button>
-          <button class="nav-btn" data-page="reports" id="nav-reports">Отчёты</button>
-          <button class="nav-btn" data-page="catalog" id="nav-catalog">Каталог знаний</button>
-          <button class="nav-btn hidden" data-page="add-article" id="nav-add-article">Добавить инструкцию</button>
-          <button class="nav-btn hidden" data-page="vidy-rabot" id="nav-vidy-rabot">Виды работ</button>
-          <button class="nav-btn hidden" data-page="raboty" id="nav-raboty">Работы</button>
-          <button class="nav-btn hidden" data-page="users" id="nav-users">Сотрудники</button>
-        </nav>
-        
-        <div class="user-info">
-          <div class="user-details">
-            <span id="user-name" class="user-name"></span>
-            <span id="user-role" class="user-role"></span>
-          </div>
-          <button id="notifications-btn" class="header-icon-btn" title="Уведомления" aria-label="Уведомления">
-            <span aria-hidden="true">🔔</span>
-            <span id="notifications-badge" class="notification-badge hidden">0</span>
-          </button>
-          <button id="profile-btn" class="header-icon-btn" title="Профиль и смена пароля" aria-label="Профиль">⚙</button>
-          <button id="logout-btn" class="btn-logout" title="Выйти">Выйти</button>
-        </div>
-
-        <button type="button" class="nav-toggle" id="nav-toggle" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobile-menu">
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
-      </div>
+    <dialog id="drawer" aria-labelledby="drawer-title">
+      <div class="drawer-head"><img class="brand" src="img/expo-m.png" alt="ЭКСПО-М"><strong id="drawer-title">Информационная<br>система ПТО</strong><button class="icon-btn" id="drawer-close" aria-label="Закрыть меню"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button></div>
+      <nav aria-label="Основная навигация"><div class="nav-group"><h2>Главная</h2><button type="button" class="nav-btn" id="nav-dashboard" data-page="dashboard"><svg class="icon" aria-hidden="true"><use href="#i-home"></use></svg>Рабочая панель</button></div>
+<div class="nav-group"><h2>ПТО</h2><button type="button" class="nav-btn" id="nav-objects" data-page="objects"><svg class="icon" aria-hidden="true"><use href="#i-building"></use></svg>Строительные объекты</button>
+<button type="button" class="nav-btn" id="nav-pto" data-page="pto"><svg class="icon" aria-hidden="true"><use href="#i-doc"></use></svg>Реестр документов</button>
+<button type="button" class="nav-btn" id="nav-executive" data-page="executive"><svg class="icon" aria-hidden="true"><use href="#i-stack"></use></svg>Исполнительная документация</button>
+<button type="button" class="nav-btn" id="nav-completeness" data-page="completeness"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>Комплектность ИД</button>
+<button type="button" class="nav-btn" id="nav-remarks" data-page="remarks"><svg class="icon" aria-hidden="true"><use href="#i-remarks"></use></svg>Замечания</button>
+<button type="button" class="nav-btn" id="nav-reports" data-page="reports"><svg class="icon" aria-hidden="true"><use href="#i-chart"></use></svg>Отчёты и выгрузки</button></div>
+<div class="nav-group"><h2>Монтажникам</h2><button type="button" class="nav-btn" id="nav-catalog" data-page="catalog"><svg class="icon" aria-hidden="true"><use href="#i-book"></use></svg>База знаний</button>
+<button type="button" class="nav-btn" id="nav-instructions" data-page="instructions"><svg class="icon" aria-hidden="true"><use href="#i-tools"></use></svg>Инструкции</button>
+<button type="button" class="nav-btn" id="nav-add-article" data-page="add-article" data-permission="content"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>Добавить статью</button>
+<button type="button" class="nav-btn" id="nav-vidy-rabot" data-page="vidy-rabot" data-permission="content"><svg class="icon" aria-hidden="true"><use href="#i-stack"></use></svg>Виды работ</button>
+<button type="button" class="nav-btn" id="nav-raboty" data-page="raboty" data-permission="content"><svg class="icon" aria-hidden="true"><use href="#i-tools"></use></svg>Управление работами</button></div>
+<div class="nav-group"><h2>О компании</h2><button type="button" class="nav-btn" id="nav-about" data-page="about"><svg class="icon" aria-hidden="true"><use href="#i-building"></use></svg>ООО «ЭКСПО-М»</button></div>
+<div class="nav-group" data-permission="admin"><h2>Администрирование</h2><button type="button" class="nav-btn" id="nav-users" data-page="users" data-permission="admin"><svg class="icon" aria-hidden="true"><use href="#i-users"></use></svg>Сотрудники и доступы</button></div></nav>
+      <button class="drawer-exit" id="logout-btn"><svg class="icon" aria-hidden="true"><use href="#i-exit"></use></svg>Выйти из системы</button>
+    </dialog>
+    <header class="topbar">
+      <button class="icon-btn" id="nav-toggle" aria-label="Открыть меню" aria-controls="drawer" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"></use></svg></button>
+      <img class="brand" src="img/expo-m.png" alt="ЭКСПО-М"><span id="section-title">Рабочая панель</span>
+      <form id="top-search" role="search"><button id="global-search-btn" aria-label="Поиск"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></button><input id="global-search" aria-label="Поиск по системе" placeholder="Найти в системе…" autocomplete="off"></form>
+      <button class="icon-btn" id="notifications-btn" aria-label="Уведомления"><svg class="icon" aria-hidden="true"><use href="#i-bell"></use></svg><span id="notifications-badge" class="notification-badge hidden"></span></button>
+      <button id="profile-btn" class="avatar" aria-label="Профиль"></button>
+      <div id="global-search-results" class="search-results" aria-live="polite" hidden></div>
     </header>
 
     <main class="main-content">
       
       <section id="catalog-page" class="content-section hidden">
         <div class="section-header">
-          <h1>Каталог инструкций, ГОСТов, решений</h1>
-          <p>Инструкции по монтажным и ремонтным работам</p>
+          <h1>База знаний</h1>
+          <p>Статьи и справочные материалы по видам работ</p>
         </div>
         
         <div class="filters">
@@ -184,10 +140,12 @@
           <p>Измените фильтры или добавьте первый документ ПТО</p>
         </div>
 
+      </section>
+      <section id="objects-page" class="content-section hidden">
         <div class="card pto-objects-card">
           <div class="section-header-row">
             <div>
-              <h3>Объекты</h3>
+              <h1>Строительные объекты</h1>
               <p class="card-hint">Объекты, по которым ведётся документация ПТО</p>
             </div>
             <button id="show-add-object" class="btn btn-light btn-sm hidden">Добавить объект</button>
@@ -226,8 +184,8 @@
 
       <section id="add-article-page" class="content-section hidden">
         <div class="section-header">
-          <h1>Добавить инструкцию</h1>
-          <p>Создание новой инструкции</p>
+          <h1>Добавить статью</h1>
+          <p>Публикация материала в базе знаний</p>
         </div>
         
         <form id="article-form" class="article-form">
@@ -235,8 +193,8 @@
           <div id="article-error" class="error-message hidden"></div>
           
           <div class="form-group">
-            <label for="article-title">Название инструкции<span class="required">*</span></label>
-            <input type="text" id="article-title" name="title" placeholder="Введите название инструкции" required>
+            <label for="article-title">Название статьи<span class="required">*</span></label>
+            <input type="text" id="article-title" name="title" placeholder="Введите название статьи" required>
           </div>
           
           <div class="form-row">
@@ -253,13 +211,13 @@
           </div>
           
           <div class="form-group">
-            <label for="article-content">Текст инструкции <span class="required">*</span></label>
-            <textarea id="article-content" name="content" rows="12" placeholder="Введите текст инструкции" required></textarea>
+            <label for="article-content">Текст статьи <span class="required">*</span></label>
+            <textarea id="article-content" name="content" rows="12" placeholder="Введите текст статьи" required></textarea>
             <span class="char-count"><span id="char-count">0</span> символов</span>
           </div>
           
           <div class="form-group">
-            <label for="article-pdf">Файл инструкции (PDF)</label>
+            <label for="article-pdf">Файл статьи (PDF)</label>
             <div class="file-upload-wrapper">
               <input type="file" id="article-pdf" name="pdfFile" accept=".pdf" class="file-input">
               <label for="article-pdf" class="file-upload-label">
@@ -276,7 +234,7 @@
             <strong id="article-author"></strong>
           </div>
           
-          <button type="submit" class="btn btn-primary btn-block">Опубликовать инструкцию</button>
+          <button type="submit" class="btn btn-primary btn-block">Опубликовать статью</button>
         </form>
       </section>
 
@@ -494,40 +452,27 @@
       </section>
 
       <section id="dashboard-page" class="content-section hidden">
-        <div class="section-header">
-          <div class="section-header-row">
-            <div>
-              <h1>Панель ПТО</h1>
-              <p>Сводка по документации, срокам и замечаниям. Показатели считаются по фактическим данным.</p>
-            </div>
-            <div class="section-actions">
-              <select id="dashboard-object" class="filter-select" aria-label="Объект для панели"></select>
-              <button id="dashboard-refresh" class="btn btn-light" type="button">Обновить</button>
-            </div>
-          </div>
-        </div>
-
+        <div class="section-header section-header-row"><div><p id="dashboard-role"></p><h1 id="greeting">Рабочая панель</h1></div><div class="date-label"><svg class="icon" aria-hidden="true"><use href="#i-calendar"></use></svg><time id="today"></time></div></div>
+        <div class="section-header-row overview-title"><h2>Обзор объектов</h2><div class="section-actions"><select id="dashboard-object" class="filter-select" aria-label="Объект для панели"></select><button id="dashboard-refresh" class="btn btn-light btn-sm">Обновить</button></div></div>
         <div class="stats" id="dashboard-stats"></div>
-
-        <div class="dashboard-grid">
-          <div class="card">
-            <h3>Просроченные документы</h3>
-            <div id="dashboard-overdue" class="compact-list"></div>
+        <div class="work-grid">
+          <div class="card"><div class="panel-title"><h2>Документы по сроку</h2><button class="text-btn" data-go="pto">В реестр <svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg></button></div><div id="dashboard-docs" class="compact-list"></div></div>
+          <div class="card shortcuts"><div class="panel-title"><h2>Быстрые действия</h2></div>
+            <button data-action="document" data-permission="pto"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>Добавить документ<svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg></button>
+            <button data-go="instructions"><svg class="icon" aria-hidden="true"><use href="#i-tools"></use></svg>Открыть инструкции<svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg></button>
+            <button data-go="completeness"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>Проверить комплектность<svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg></button>
+            <button data-go="catalog"><svg class="icon" aria-hidden="true"><use href="#i-book"></use></svg>Найти материал<svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg></button>
           </div>
-          <div class="card">
-            <h3>Незакрытые замечания</h3>
-            <div id="dashboard-remarks" class="compact-list"></div>
-          </div>
+          <div class="card"><div class="panel-title"><h2>Открытые замечания</h2><button class="text-btn" data-go="remarks">Все замечания <svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg></button></div><div id="dashboard-remarks" class="compact-list"></div></div>
+          <div class="card"><div class="panel-title"><h2>Мои уведомления</h2><button class="text-btn" data-action="notifications">Все <svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg></button></div><div id="dashboard-notices" class="compact-list"></div></div>
         </div>
-
-        <div class="card">
-          <h3>Поиск по базе знаний и документам</h3>
-          <div class="filters">
-            <input type="text" id="global-search" class="search-input" placeholder="Название, шифр, текст документа или инструкции">
-            <button id="global-search-btn" class="btn btn-primary" type="button">Найти</button>
-          </div>
-          <div id="global-search-results" class="search-results"></div>
-        </div>
+      </section>
+      <section id="instructions-page" class="content-section hidden"><div class="section-header"><h1>Инструкции</h1><p>Порядок выполнения работ и связанные материалы</p></div><div class="filters"><input type="search" id="instruction-search" aria-label="Поиск инструкций" placeholder="Найти инструкцию"><select id="instruction-kind" aria-label="Вид работ"></select></div><div id="instruction-list"></div></section>
+      <section id="about-page" class="content-section hidden">
+        <div class="company-head"><img class="brand" src="img/expo-m.png" alt="ЭКСПО-М"><div><h1>ООО «ЭКСПО-М»</h1><p>Строительные и монтажные работы</p></div></div>
+        <div class="company-grid"><article class="card"><h2>О компании</h2><p>ООО «ЭКСПО-М» — строительная организация, осуществляющая строительные и монтажные работы. Компания участвует в реализации проектов на объектах строительства.</p></article>
+        <article class="card project"><p class="section-label">Текущий проект</p><h2>Строительство Регионального центра обработки данных (РЦОД)</h2><p class="location"><svg class="icon" aria-hidden="true"><use href="#i-pin"></use></svg>Саратовская область, Балаковский район</p><p>ООО «ЭКСПО-М» участвует в строительстве Регионального центра обработки данных в Балаковском районе Саратовской области, выполняя строительно-монтажные работы.</p></article></div>
+        <section class="card gallery"><h2>Фотографии строительства</h2><div id="project-gallery"></div><div class="gallery-empty"><svg class="icon" aria-hidden="true"><use href="#i-photo"></use></svg>Фотографии проекта пока не размещены</div></section>
       </section>
 
       <section id="completeness-page" class="content-section hidden">
@@ -641,7 +586,7 @@
 
     <footer class="footer">
       <p><strong>Информационная система ПТО</strong> — Цифровые инструменты производственно-технического отдела © <span id="current-year"></span></p>
-      <p class="footer-org">ООО «ИНФОТЕХ БАЛАКОВО» · пилотное внедрение: ООО «СтройМонтажГрупп», объект «Региональный ЦОД в г. Балаково»</p>
+      <p class="footer-org">ООО «ЭКСПО-М»</p>
     </footer>
   </div>
 
@@ -663,7 +608,7 @@
 
   <div id="article-modal" class="modal hidden">
     <div class="modal-content">
-      <button class="modal-close" id="modal-close">✕</button>
+      <button class="modal-close" id="modal-close" aria-label="Закрыть окно">✕</button>
       <div id="modal-body"></div>
     </div>
   </div>
